@@ -11,6 +11,17 @@ namespace UnityAssistant.Editor
     {
         private const string WindowStateKey = "UnityAssistant.WindowState";
 
+        private enum Tab
+        {
+            Assistant = 0,
+            Plan = 1,
+            Patches = 2,
+            Index = 3,
+            Settings = 4
+        }
+
+        private Tab currentTab = Tab.Assistant;
+
         private string prompt = "";
         private string output = "Assistant response will appear here.";
 
@@ -25,7 +36,12 @@ namespace UnityAssistant.Editor
         private bool isSending = false;
         private bool hasApprovedPlan = false;
 
-        private Vector2 mainScroll;
+        private Vector2 assistantScroll;
+        private Vector2 planScroll;
+        private Vector2 patchesScroll;
+        private Vector2 indexScroll;
+        private Vector2 settingsScroll;
+
         private Vector2 promptScroll;
         private Vector2 outputScroll;
         private Vector2 selectedScriptScroll;
@@ -46,7 +62,7 @@ namespace UnityAssistant.Editor
             AssistantWindow window = GetWindow<AssistantWindow>("Unity Assistant");
             window.apiKeyInput = OpenAISettings.ApiKey;
             window.modelInput = OpenAISettings.Model;
-            window.minSize = new Vector2(900, 700);
+            window.minSize = new Vector2(900, 650);
             window.LoadWindowState();
             window.Repaint();
         }
@@ -73,79 +89,126 @@ namespace UnityAssistant.Editor
         private void OnFocus()
         {
             RefreshSelectedScript();
-            LoadWindowState();
             Repaint();
         }
 
         private void OnGUI()
         {
-            mainScroll = EditorGUILayout.BeginScrollView(mainScroll);
+            DrawHeader();
+            DrawTabs();
+            GUILayout.Space(8);
 
-            GUILayout.Label("Unity Assistant", EditorStyles.boldLabel);
-            GUILayout.Space(10);
-
-            DrawOpenAISettings();
-            GUILayout.Space(10);
-
-            DrawSelectedScriptSection();
-            GUILayout.Space(10);
-
-            DrawCodeIndexSection();
-            GUILayout.Space(10);
-
-            DrawPrompt();
-            GUILayout.Space(10);
-
-            DrawButtons();
-            GUILayout.Space(10);
-
-            DrawOutput();
-            GUILayout.Space(10);
-
-            DrawPlanSection();
-            GUILayout.Space(10);
-
-            DrawPatchSection();
-
-            GUILayout.Space(20);
-
-            EditorGUILayout.EndScrollView();
+            switch (currentTab)
+            {
+                case Tab.Assistant:
+                    DrawAssistantTab();
+                    break;
+                case Tab.Plan:
+                    DrawPlanTab();
+                    break;
+                case Tab.Patches:
+                    DrawPatchesTab();
+                    break;
+                case Tab.Index:
+                    DrawIndexTab();
+                    break;
+                case Tab.Settings:
+                    DrawSettingsTab();
+                    break;
+            }
         }
 
-        private void DrawOpenAISettings()
+        private void DrawHeader()
         {
             EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Unity Assistant", EditorStyles.boldLabel);
 
-            GUILayout.Label("OpenAI Settings", EditorStyles.boldLabel);
+            string status = isSending ? "Busy" : "Ready";
+            string selected = string.IsNullOrWhiteSpace(selectedScriptPath) ? "None" : selectedScriptPath;
 
-            apiKeyInput = EditorGUILayout.PasswordField("API Key", apiKeyInput);
-            modelInput = EditorGUILayout.TextField("Model", modelInput);
-
-            EditorGUILayout.BeginHorizontal();
-
-            if (GUILayout.Button("Save Settings"))
-            {
-                OpenAISettings.ApiKey = apiKeyInput;
-                OpenAISettings.Model = modelInput;
-            }
-
-            if (GUILayout.Button("Reload"))
-            {
-                apiKeyInput = OpenAISettings.ApiKey;
-                modelInput = OpenAISettings.Model;
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.HelpBox(
-                "API key is stored locally using Unity EditorPrefs.",
-                MessageType.Info
-            );
+            EditorGUILayout.LabelField("Status", status);
+            EditorGUILayout.LabelField("Selected Script", selected);
 
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawSelectedScriptSection()
+        private void DrawTabs()
+        {
+            string[] tabNames =
+            {
+                "Assistant",
+                "Plan",
+                "Patches",
+                "Index",
+                "Settings"
+            };
+
+            currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, GUILayout.Height(28));
+        }
+
+        private void DrawAssistantTab()
+        {
+            assistantScroll = EditorGUILayout.BeginScrollView(assistantScroll);
+
+            DrawSelectedScriptCard();
+            GUILayout.Space(8);
+
+            DrawPromptCard();
+            GUILayout.Space(8);
+
+            DrawActionButtonsCard();
+            GUILayout.Space(8);
+
+            DrawOutputCard();
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawPlanTab()
+        {
+            planScroll = EditorGUILayout.BeginScrollView(planScroll);
+
+            DrawPlanCard();
+            GUILayout.Space(8);
+
+            DrawEditorSetupCard();
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawPatchesTab()
+        {
+            patchesScroll = EditorGUILayout.BeginScrollView(patchesScroll);
+
+            DrawPatchesCard();
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawIndexTab()
+        {
+            indexScroll = EditorGUILayout.BeginScrollView(indexScroll);
+
+            DrawCodeIndexCard();
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawSettingsTab()
+        {
+            settingsScroll = EditorGUILayout.BeginScrollView(settingsScroll);
+
+            DrawSettingsCard();
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawSelectedScriptCard()
         {
             EditorGUILayout.BeginVertical("box");
 
@@ -160,13 +223,13 @@ namespace UnityAssistant.Editor
 
             EditorGUILayout.BeginHorizontal();
 
-            if (GUILayout.Button("Refresh Selection"))
+            if (GUILayout.Button("Refresh Selection", GUILayout.Height(26)))
             {
                 RefreshSelectedScript();
                 SaveWindowState();
             }
 
-            if (GUILayout.Button("Clear Selected Script"))
+            if (GUILayout.Button("Clear Selected Script", GUILayout.Height(26)))
             {
                 selectedScriptPath = "";
                 selectedScriptPreview = "";
@@ -178,7 +241,7 @@ namespace UnityAssistant.Editor
             GUILayout.Space(4);
             GUILayout.Label("Preview", EditorStyles.miniBoldLabel);
 
-            selectedScriptScroll = EditorGUILayout.BeginScrollView(selectedScriptScroll, GUILayout.Height(100));
+            selectedScriptScroll = EditorGUILayout.BeginScrollView(selectedScriptScroll, GUILayout.Height(160));
             EditorGUILayout.TextArea(
                 string.IsNullOrWhiteSpace(selectedScriptPreview)
                     ? "Click a .cs file in the Project window to load it here."
@@ -190,82 +253,14 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawCodeIndexSection()
-        {
-            EditorGUILayout.BeginVertical("box");
-
-            GUILayout.Label("Code Index", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            string newSearch = EditorGUILayout.TextField("Search", symbolSearchInput);
-            if (newSearch != symbolSearchInput)
-            {
-                symbolSearchInput = newSearch;
-                SaveWindowState();
-            }
-
-            if (GUILayout.Button("Rebuild Index", GUILayout.Width(120)))
-            {
-                CodeIndex.RebuildIndex();
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            ScriptIndexEntry[] results = string.IsNullOrWhiteSpace(symbolSearchInput)
-                ? new ScriptIndexEntry[0]
-                : CodeIndex.Search(symbolSearchInput, 10);
-
-            symbolSearchScroll = EditorGUILayout.BeginScrollView(symbolSearchScroll, GUILayout.Height(120));
-
-            if (results.Length == 0)
-            {
-                EditorGUILayout.LabelField("No results.");
-            }
-            else
-            {
-                foreach (ScriptIndexEntry result in results)
-                {
-                    EditorGUILayout.BeginVertical("box");
-
-                    EditorGUILayout.LabelField("Path", result.path ?? "");
-                    EditorGUILayout.LabelField("Class", result.className ?? "");
-                    EditorGUILayout.LabelField("Base", result.baseClass ?? "");
-
-                    string methodsText = result.methods == null || result.methods.Length == 0
-                        ? "(none)"
-                        : string.Join(", ", result.methods);
-
-                    string refsText = result.referencedTypes == null || result.referencedTypes.Length == 0
-                        ? "(none)"
-                        : string.Join(", ", result.referencedTypes);
-
-                    EditorGUILayout.LabelField("Methods", methodsText);
-                    EditorGUILayout.LabelField("References", refsText);
-
-                    if (GUILayout.Button("Use This Script"))
-                    {
-                        selectedScriptPath = result.path;
-                        selectedScriptPreview = TruncatePreview(LoadFileContent(result.path));
-                        SaveWindowState();
-                    }
-
-                    EditorGUILayout.EndVertical();
-                }
-            }
-
-            EditorGUILayout.EndScrollView();
-
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawPrompt()
+        private void DrawPromptCard()
         {
             EditorGUILayout.BeginVertical("box");
 
             GUILayout.Label("Prompt", EditorStyles.boldLabel);
 
-            promptScroll = EditorGUILayout.BeginScrollView(promptScroll, GUILayout.Height(100));
-            string newPrompt = EditorGUILayout.TextArea(prompt);
+            promptScroll = EditorGUILayout.BeginScrollView(promptScroll, GUILayout.Height(140));
+            string newPrompt = EditorGUILayout.TextArea(prompt, GUILayout.ExpandHeight(true));
             if (newPrompt != prompt)
             {
                 prompt = newPrompt;
@@ -276,34 +271,51 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawButtons()
+        private void DrawActionButtonsCard()
         {
+            EditorGUILayout.BeginVertical("box");
+
+            GUILayout.Label("Actions", EditorStyles.boldLabel);
+
             EditorGUILayout.BeginHorizontal();
 
             GUI.enabled = !isSending;
-
-            if (GUILayout.Button("Generate Plan", GUILayout.Height(32)))
+            if (GUILayout.Button("Generate Plan", GUILayout.Height(34)))
             {
                 GeneratePlan();
             }
 
             GUI.enabled = !isSending && hasApprovedPlan;
-
-            if (GUILayout.Button("Implement Approved Plan", GUILayout.Height(32)))
+            if (GUILayout.Button("Implement Approved Plan", GUILayout.Height(34)))
             {
                 ImplementApprovedPlan();
             }
 
             GUI.enabled = !isSending && lastAppliedChange != null;
-
-            if (GUILayout.Button("Revert Last Change", GUILayout.Height(32)))
+            if (GUILayout.Button("Revert Last Change", GUILayout.Height(34)))
             {
                 RevertLastChange();
             }
 
-            GUI.enabled = !isSending;
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
 
-            if (GUILayout.Button("Clear", GUILayout.Height(32)))
+            GUILayout.Space(6);
+
+            EditorGUILayout.BeginHorizontal();
+
+            GUI.enabled = !isSending;
+            if (GUILayout.Button("Go To Plan Tab", GUILayout.Height(28)))
+            {
+                currentTab = Tab.Plan;
+            }
+
+            if (GUILayout.Button("Go To Patches Tab", GUILayout.Height(28)))
+            {
+                currentTab = Tab.Patches;
+            }
+
+            if (GUILayout.Button("Clear Session", GUILayout.Height(28)))
             {
                 output = "";
                 lastResponse = null;
@@ -315,24 +327,25 @@ namespace UnityAssistant.Editor
             }
 
             GUI.enabled = true;
-
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndVertical();
         }
 
-        private void DrawOutput()
+        private void DrawOutputCard()
         {
             EditorGUILayout.BeginVertical("box");
 
             GUILayout.Label("Output", EditorStyles.boldLabel);
 
-            outputScroll = EditorGUILayout.BeginScrollView(outputScroll, GUILayout.Height(140));
+            outputScroll = EditorGUILayout.BeginScrollView(outputScroll, GUILayout.Height(220));
             EditorGUILayout.TextArea(output, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
 
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawPlanSection()
+        private void DrawPlanCard()
         {
             EditorGUILayout.BeginVertical("box");
             GUILayout.Label("Implementation Plan", EditorStyles.boldLabel);
@@ -360,7 +373,7 @@ namespace UnityAssistant.Editor
             GUILayout.Space(6);
             DrawStringList("Risks", plan.risks);
 
-            GUILayout.Space(8);
+            GUILayout.Space(10);
 
             EditorGUILayout.BeginHorizontal();
 
@@ -380,28 +393,62 @@ namespace UnityAssistant.Editor
                 SaveWindowState();
             }
 
+            if (GUILayout.Button("Go To Assistant Tab", GUILayout.Height(30)))
+            {
+                currentTab = Tab.Assistant;
+            }
+
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawStringList(string label, string[] items)
+        private void DrawEditorSetupCard()
         {
-            GUILayout.Label(label, EditorStyles.miniBoldLabel);
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("Editor Setup Instructions", EditorStyles.boldLabel);
 
-            if (items == null || items.Length == 0)
+            EditorSetupInstruction[] instructions = null;
+
+            if (lastResponse != null && lastResponse.editorSetup != null && lastResponse.editorSetup.Length > 0)
             {
-                EditorGUILayout.LabelField("(none)");
+                instructions = lastResponse.editorSetup;
+            }
+            else if (lastPlanResponse != null && lastPlanResponse.plan != null &&
+                     lastPlanResponse.plan.editorSetup != null &&
+                     lastPlanResponse.plan.editorSetup.Length > 0)
+            {
+                instructions = lastPlanResponse.plan.editorSetup;
+            }
+
+            if (instructions == null || instructions.Length == 0)
+            {
+                EditorGUILayout.HelpBox("No editor setup instructions returned.", MessageType.Info);
+                EditorGUILayout.EndVertical();
                 return;
             }
 
-            for (int i = 0; i < items.Length; i++)
+            for (int i = 0; i < instructions.Length; i++)
             {
-                EditorGUILayout.LabelField("- " + items[i]);
+                EditorSetupInstruction step = instructions[i];
+
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField("Target", string.IsNullOrWhiteSpace(step.target) ? "(none)" : step.target);
+                EditorGUILayout.LabelField("Action", string.IsNullOrWhiteSpace(step.action) ? "(none)" : step.action);
+
+                GUILayout.Label("Details", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextArea(
+                    string.IsNullOrWhiteSpace(step.details) ? "(none)" : step.details,
+                    GUILayout.MinHeight(45)
+                );
+
+                EditorGUILayout.EndVertical();
             }
+
+            EditorGUILayout.EndVertical();
         }
 
-        private void DrawPatchSection()
+        private void DrawPatchesCard()
         {
             EditorGUILayout.BeginVertical("box");
             GUILayout.Label("Proposed Patches", EditorStyles.boldLabel);
@@ -415,7 +462,7 @@ namespace UnityAssistant.Editor
 
             EditorGUILayout.BeginHorizontal();
 
-            EditorGUILayout.BeginVertical(GUILayout.Width(260));
+            EditorGUILayout.BeginVertical(GUILayout.Width(300));
             GUILayout.Label("Patch List", EditorStyles.miniBoldLabel);
 
             for (int i = 0; i < lastResponse.patches.Length; i++)
@@ -464,14 +511,14 @@ namespace UnityAssistant.Editor
 
                 EditorGUILayout.BeginVertical();
                 GUILayout.Label("Original", EditorStyles.miniBoldLabel);
-                patchOldScroll = EditorGUILayout.BeginScrollView(patchOldScroll, GUILayout.Height(180));
+                patchOldScroll = EditorGUILayout.BeginScrollView(patchOldScroll, GUILayout.Height(260));
                 EditorGUILayout.TextArea(patch.originalContent ?? "", GUILayout.ExpandHeight(true));
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical();
                 GUILayout.Label("New", EditorStyles.miniBoldLabel);
-                patchNewScroll = EditorGUILayout.BeginScrollView(patchNewScroll, GUILayout.Height(180));
+                patchNewScroll = EditorGUILayout.BeginScrollView(patchNewScroll, GUILayout.Height(260));
                 EditorGUILayout.TextArea(patch.newContent ?? "", GUILayout.ExpandHeight(true));
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.EndVertical();
@@ -487,6 +534,133 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
+        }
+
+        private void DrawCodeIndexCard()
+        {
+            EditorGUILayout.BeginVertical("box");
+
+            GUILayout.Label("Code Index", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            string newSearch = EditorGUILayout.TextField("Search", symbolSearchInput);
+            if (newSearch != symbolSearchInput)
+            {
+                symbolSearchInput = newSearch;
+                SaveWindowState();
+            }
+
+            if (GUILayout.Button("Rebuild Index", GUILayout.Width(120)))
+            {
+                CodeIndex.RebuildIndex();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            symbolSearchScroll = EditorGUILayout.BeginScrollView(symbolSearchScroll, GUILayout.Height(420));
+
+            ScriptIndexEntry[] results = string.IsNullOrWhiteSpace(symbolSearchInput)
+                ? new ScriptIndexEntry[0]
+                : CodeIndex.Search(symbolSearchInput, 10);
+
+            if (results.Length == 0)
+            {
+                EditorGUILayout.LabelField("No results.");
+            }
+            else
+            {
+                foreach (ScriptIndexEntry result in results)
+                {
+                    EditorGUILayout.BeginVertical("box");
+
+                    EditorGUILayout.LabelField("Path", result.path ?? "");
+                    EditorGUILayout.LabelField("Class", result.className ?? "");
+                    EditorGUILayout.LabelField("Base", result.baseClass ?? "");
+
+                    string methodsText = result.methods == null || result.methods.Length == 0
+                        ? "(none)"
+                        : string.Join(", ", result.methods);
+
+                    string refsText = result.referencedTypes == null || result.referencedTypes.Length == 0
+                        ? "(none)"
+                        : string.Join(", ", result.referencedTypes);
+
+                    EditorGUILayout.LabelField("Methods", methodsText);
+                    EditorGUILayout.LabelField("References", refsText);
+
+                    if (GUILayout.Button("Use This Script", GUILayout.Height(26)))
+                    {
+                        selectedScriptPath = result.path;
+                        selectedScriptPreview = TruncatePreview(LoadFileContent(result.path));
+                        currentTab = Tab.Assistant;
+                        SaveWindowState();
+                    }
+
+                    EditorGUILayout.EndVertical();
+                }
+            }
+
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawSettingsCard()
+        {
+            EditorGUILayout.BeginVertical("box");
+
+            GUILayout.Label("OpenAI Settings", EditorStyles.boldLabel);
+
+            apiKeyInput = EditorGUILayout.PasswordField("API Key", apiKeyInput);
+            modelInput = EditorGUILayout.TextField("Model", modelInput);
+
+            GUILayout.Space(6);
+
+            EditorGUILayout.BeginHorizontal();
+
+            if (GUILayout.Button("Save Settings", GUILayout.Height(30)))
+            {
+                OpenAISettings.ApiKey = apiKeyInput;
+                OpenAISettings.Model = modelInput;
+            }
+
+            if (GUILayout.Button("Reload Settings", GUILayout.Height(30)))
+            {
+                apiKeyInput = OpenAISettings.ApiKey;
+                modelInput = OpenAISettings.Model;
+            }
+
+            if (GUILayout.Button("Reset Saved State", GUILayout.Height(30)))
+            {
+                ResetSavedState();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            GUILayout.Space(8);
+
+            EditorGUILayout.HelpBox(
+                "API key is stored locally using Unity EditorPrefs. Window state is also saved locally.",
+                MessageType.Info
+            );
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawStringList(string label, string[] items)
+        {
+            GUILayout.Label(label, EditorStyles.miniBoldLabel);
+
+            if (items == null || items.Length == 0)
+            {
+                EditorGUILayout.LabelField("(none)");
+                return;
+            }
+
+            for (int i = 0; i < items.Length; i++)
+            {
+                EditorGUILayout.LabelField("- " + items[i]);
+            }
         }
 
         private async void GeneratePlan()
@@ -533,6 +707,7 @@ namespace UnityAssistant.Editor
                 approvedPlan = null;
                 hasApprovedPlan = false;
                 output = FormatPlanResponse(response, request);
+                currentTab = Tab.Plan;
                 SaveWindowState();
             }
             catch (System.Exception ex)
@@ -589,6 +764,7 @@ namespace UnityAssistant.Editor
                 AssistantResponse response = await ApiClient.SendImplementationRequestAsync(request, approvedPlan);
                 lastResponse = response;
                 output = FormatPatchResponse(response, request);
+                currentTab = Tab.Patches;
                 SaveWindowState();
             }
             catch (System.Exception ex)
@@ -657,6 +833,32 @@ namespace UnityAssistant.Editor
             catch (System.Exception ex)
             {
                 output += "\n\nFailed while applying all patches:\n" + ex.Message;
+                Debug.LogException(ex);
+                SaveWindowState();
+            }
+        }
+
+        private void RevertLastChange()
+        {
+            if (lastAppliedChange == null)
+            {
+                output = "No last change available to revert.";
+                SaveWindowState();
+                return;
+            }
+
+            try
+            {
+                PatchApplier.RevertLastChange(lastAppliedChange);
+                output += "\n\nReverted last change: " + lastAppliedChange.filePath;
+
+                lastAppliedChange = null;
+                RefreshSelectedScript();
+                SaveWindowState();
+            }
+            catch (System.Exception ex)
+            {
+                output += "\n\nFailed to revert last change:\n" + ex.Message;
                 Debug.LogException(ex);
                 SaveWindowState();
             }
@@ -871,30 +1073,21 @@ namespace UnityAssistant.Editor
             lastAppliedChange = state.lastAppliedChange;
         }
 
-        private void RevertLastChange()
+        private void ResetSavedState()
         {
-            if (lastAppliedChange == null)
-            {
-                output = "No last change available to revert.";
-                SaveWindowState();
-                return;
-            }
+            EditorPrefs.DeleteKey(WindowStateKey);
 
-            try
-            {
-                PatchApplier.RevertLastChange(lastAppliedChange);
-                output += "\n\nReverted last change: " + lastAppliedChange.filePath;
-
-                lastAppliedChange = null;
-                RefreshSelectedScript();
-                SaveWindowState();
-            }
-            catch (System.Exception ex)
-            {
-                output += "\n\nFailed to revert last change:\n" + ex.Message;
-                Debug.LogException(ex);
-                SaveWindowState();
-            }
+            prompt = "";
+            output = "Assistant response will appear here.";
+            selectedScriptPath = "";
+            selectedScriptPreview = "";
+            symbolSearchInput = "";
+            lastResponse = null;
+            lastPlanResponse = null;
+            approvedPlan = null;
+            hasApprovedPlan = false;
+            selectedPatchIndex = -1;
+            lastAppliedChange = null;
         }
     }
 }
