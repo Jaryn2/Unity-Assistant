@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using System.Text;
+using System.Linq;
 using UnityAssistant.Editor.Models;
 using UnityAssistant.Editor.Services;
 
@@ -35,6 +36,7 @@ namespace UnityAssistant.Editor
         private AssistantResponse lastResponse;
         private AssistantResponse lastPlanResponse;
         private FeaturePlan approvedPlan;
+        private LastAppliedChange lastAppliedChange;
 
         private int selectedPatchIndex = -1;
 
@@ -292,6 +294,13 @@ namespace UnityAssistant.Editor
                 ImplementApprovedPlan();
             }
 
+            GUI.enabled = !isSending && lastAppliedChange != null;
+
+            if (GUILayout.Button("Revert Last Change", GUILayout.Height(32)))
+            {
+                RevertLastChange();
+            }
+
             GUI.enabled = !isSending;
 
             if (GUILayout.Button("Clear", GUILayout.Height(32)))
@@ -422,14 +431,19 @@ namespace UnityAssistant.Editor
                 }
             }
 
+            GUILayout.Space(10);
+
             if (selectedPatchIndex >= 0 && selectedPatchIndex < lastResponse.patches.Length)
             {
-                GUILayout.Space(10);
-
                 if (GUILayout.Button("Apply Selected Patch", GUILayout.Height(32)))
                 {
                     ApplySelectedPatch();
                 }
+            }
+
+            if (GUILayout.Button("Apply All Patches", GUILayout.Height(32)))
+            {
+                ApplyAllPatches();
             }
 
             EditorGUILayout.EndVertical();
@@ -598,7 +612,7 @@ namespace UnityAssistant.Editor
 
             try
             {
-                PatchApplier.ApplyPatch(lastResponse.patches[selectedPatchIndex]);
+                lastAppliedChange = PatchApplier.ApplyPatch(lastResponse.patches[selectedPatchIndex]);
                 output += "\n\nApplied patch: " + lastResponse.patches[selectedPatchIndex].filePath;
                 RefreshSelectedScript();
                 SaveWindowState();
@@ -606,6 +620,43 @@ namespace UnityAssistant.Editor
             catch (System.Exception ex)
             {
                 output += "\n\nFailed to apply patch:\n" + ex.Message;
+                Debug.LogException(ex);
+                SaveWindowState();
+            }
+        }
+
+        private void ApplyAllPatches()
+        {
+            if (lastResponse == null || lastResponse.patches == null || lastResponse.patches.Length == 0)
+            {
+                output += "\n\nNo patches available to apply.";
+                SaveWindowState();
+                return;
+            }
+
+            try
+            {
+                FilePatch[] orderedPatches = lastResponse.patches
+                    .OrderBy(p => string.IsNullOrWhiteSpace(p.originalContent) ? 0 : 1)
+                    .ThenBy(p => p.filePath)
+                    .ToArray();
+
+                int appliedCount = 0;
+
+                for (int i = 0; i < orderedPatches.Length; i++)
+                {
+                    FilePatch patch = orderedPatches[i];
+                    lastAppliedChange = PatchApplier.ApplyPatch(patch);
+                    appliedCount++;
+                }
+
+                output += $"\n\nApplied all patches successfully. Count: {appliedCount}";
+                RefreshSelectedScript();
+                SaveWindowState();
+            }
+            catch (System.Exception ex)
+            {
+                output += "\n\nFailed while applying all patches:\n" + ex.Message;
                 Debug.LogException(ex);
                 SaveWindowState();
             }
@@ -786,7 +837,8 @@ namespace UnityAssistant.Editor
                 selectedPatchIndex = selectedPatchIndex,
                 lastResponse = lastResponse,
                 lastPlanResponse = lastPlanResponse,
-                approvedPlan = approvedPlan
+                approvedPlan = approvedPlan,
+                lastAppliedChange = lastAppliedChange
             };
 
             string json = JsonUtility.ToJson(state);
@@ -816,6 +868,33 @@ namespace UnityAssistant.Editor
             lastResponse = state.lastResponse;
             lastPlanResponse = state.lastPlanResponse;
             approvedPlan = state.approvedPlan;
+            lastAppliedChange = state.lastAppliedChange;
+        }
+
+        private void RevertLastChange()
+        {
+            if (lastAppliedChange == null)
+            {
+                output = "No last change available to revert.";
+                SaveWindowState();
+                return;
+            }
+
+            try
+            {
+                PatchApplier.RevertLastChange(lastAppliedChange);
+                output += "\n\nReverted last change: " + lastAppliedChange.filePath;
+
+                lastAppliedChange = null;
+                RefreshSelectedScript();
+                SaveWindowState();
+            }
+            catch (System.Exception ex)
+            {
+                output += "\n\nFailed to revert last change:\n" + ex.Message;
+                Debug.LogException(ex);
+                SaveWindowState();
+            }
         }
     }
 }
