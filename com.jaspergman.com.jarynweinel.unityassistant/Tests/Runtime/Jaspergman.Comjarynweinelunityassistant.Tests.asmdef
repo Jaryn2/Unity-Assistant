@@ -1,0 +1,11 @@
+{
+    "name": "Jaspergman.Comjarynweinelunityassistant.Tests",
+    "references": [
+        "Jaspergman.Comjarynweinelunityassistant"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": []
+}

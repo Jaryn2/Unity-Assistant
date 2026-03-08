@@ -1,0 +1,10 @@
+{
+    "name": "Jaspergman.Comjarynweinelunityassistant.Editor",
+    "references": [
+      "Jaspergman.Comjarynweinelunityassistant"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}
