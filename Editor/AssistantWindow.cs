@@ -8,7 +8,8 @@ namespace UnityAssistant.Editor
 {
     public class AssistantWindow : EditorWindow
     {
-        private Vector2 mainScroll;
+        private const string WindowStateKey = "UnityAssistant.WindowState";
+
         private string prompt = "";
         private string output = "Assistant response will appear here.";
 
@@ -23,6 +24,7 @@ namespace UnityAssistant.Editor
         private bool isSending = false;
         private bool hasApprovedPlan = false;
 
+        private Vector2 mainScroll;
         private Vector2 promptScroll;
         private Vector2 outputScroll;
         private Vector2 selectedScriptScroll;
@@ -42,19 +44,34 @@ namespace UnityAssistant.Editor
             AssistantWindow window = GetWindow<AssistantWindow>("Unity Assistant");
             window.apiKeyInput = OpenAISettings.ApiKey;
             window.modelInput = OpenAISettings.Model;
-            window.RefreshSelectedScript();
             window.minSize = new Vector2(900, 700);
+            window.LoadWindowState();
+            window.Repaint();
+        }
+
+        private void OnEnable()
+        {
+            apiKeyInput = OpenAISettings.ApiKey;
+            modelInput = OpenAISettings.Model;
+            LoadWindowState();
+        }
+
+        private void OnDisable()
+        {
+            SaveWindowState();
         }
 
         private void OnSelectionChange()
         {
             RefreshSelectedScript();
+            SaveWindowState();
             Repaint();
         }
 
         private void OnFocus()
         {
             RefreshSelectedScript();
+            LoadWindowState();
             Repaint();
         }
 
@@ -83,11 +100,7 @@ namespace UnityAssistant.Editor
             DrawOutput();
             GUILayout.Space(10);
 
-
             DrawPlanSection();
-            GUILayout.Space(10);
-
-            DrawEditorSetupSection();
             GUILayout.Space(10);
 
             DrawPatchSection();
@@ -148,12 +161,14 @@ namespace UnityAssistant.Editor
             if (GUILayout.Button("Refresh Selection"))
             {
                 RefreshSelectedScript();
+                SaveWindowState();
             }
 
             if (GUILayout.Button("Clear Selected Script"))
             {
                 selectedScriptPath = "";
                 selectedScriptPreview = "";
+                SaveWindowState();
             }
 
             EditorGUILayout.EndHorizontal();
@@ -161,7 +176,7 @@ namespace UnityAssistant.Editor
             GUILayout.Space(4);
             GUILayout.Label("Preview", EditorStyles.miniBoldLabel);
 
-            selectedScriptScroll = EditorGUILayout.BeginScrollView(selectedScriptScroll, GUILayout.Height(140));
+            selectedScriptScroll = EditorGUILayout.BeginScrollView(selectedScriptScroll, GUILayout.Height(100));
             EditorGUILayout.TextArea(
                 string.IsNullOrWhiteSpace(selectedScriptPreview)
                     ? "Click a .cs file in the Project window to load it here."
@@ -180,7 +195,12 @@ namespace UnityAssistant.Editor
             GUILayout.Label("Code Index", EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
-            symbolSearchInput = EditorGUILayout.TextField("Search", symbolSearchInput);
+            string newSearch = EditorGUILayout.TextField("Search", symbolSearchInput);
+            if (newSearch != symbolSearchInput)
+            {
+                symbolSearchInput = newSearch;
+                SaveWindowState();
+            }
 
             if (GUILayout.Button("Rebuild Index", GUILayout.Width(120)))
             {
@@ -193,7 +213,7 @@ namespace UnityAssistant.Editor
                 ? new ScriptIndexEntry[0]
                 : CodeIndex.Search(symbolSearchInput, 10);
 
-            symbolSearchScroll = EditorGUILayout.BeginScrollView(symbolSearchScroll, GUILayout.Height(160));
+            symbolSearchScroll = EditorGUILayout.BeginScrollView(symbolSearchScroll, GUILayout.Height(120));
 
             if (results.Length == 0)
             {
@@ -224,6 +244,7 @@ namespace UnityAssistant.Editor
                     {
                         selectedScriptPath = result.path;
                         selectedScriptPreview = TruncatePreview(LoadFileContent(result.path));
+                        SaveWindowState();
                     }
 
                     EditorGUILayout.EndVertical();
@@ -242,7 +263,12 @@ namespace UnityAssistant.Editor
             GUILayout.Label("Prompt", EditorStyles.boldLabel);
 
             promptScroll = EditorGUILayout.BeginScrollView(promptScroll, GUILayout.Height(100));
-            prompt = EditorGUILayout.TextArea(prompt);
+            string newPrompt = EditorGUILayout.TextArea(prompt);
+            if (newPrompt != prompt)
+            {
+                prompt = newPrompt;
+                SaveWindowState();
+            }
             EditorGUILayout.EndScrollView();
 
             EditorGUILayout.EndVertical();
@@ -276,6 +302,7 @@ namespace UnityAssistant.Editor
                 approvedPlan = null;
                 hasApprovedPlan = false;
                 selectedPatchIndex = -1;
+                SaveWindowState();
             }
 
             GUI.enabled = true;
@@ -289,7 +316,7 @@ namespace UnityAssistant.Editor
 
             GUILayout.Label("Output", EditorStyles.boldLabel);
 
-            outputScroll = EditorGUILayout.BeginScrollView(outputScroll, GUILayout.Height(220));
+            outputScroll = EditorGUILayout.BeginScrollView(outputScroll, GUILayout.Height(140));
             EditorGUILayout.TextArea(output, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
 
@@ -333,6 +360,7 @@ namespace UnityAssistant.Editor
                 approvedPlan = plan;
                 hasApprovedPlan = true;
                 output = "Plan approved. You can now click 'Implement Approved Plan'.";
+                SaveWindowState();
             }
 
             if (GUILayout.Button("Clear Plan", GUILayout.Height(30)))
@@ -340,6 +368,7 @@ namespace UnityAssistant.Editor
                 approvedPlan = null;
                 lastPlanResponse = null;
                 hasApprovedPlan = false;
+                SaveWindowState();
             }
 
             EditorGUILayout.EndHorizontal();
@@ -383,11 +412,13 @@ namespace UnityAssistant.Editor
             for (int i = 0; i < lastResponse.patches.Length; i++)
             {
                 FilePatch patch = lastResponse.patches[i];
-                string label = $"{i + 1}. {patch.filePath}";
+                string patchType = string.IsNullOrWhiteSpace(patch.originalContent) ? "[NEW]" : "[EDIT]";
+                string label = $"{i + 1}. {patchType} {patch.filePath}";
 
                 if (GUILayout.Button(label, GUILayout.Height(28)))
                 {
                     selectedPatchIndex = i;
+                    SaveWindowState();
                 }
             }
 
@@ -419,14 +450,14 @@ namespace UnityAssistant.Editor
 
                 EditorGUILayout.BeginVertical();
                 GUILayout.Label("Original", EditorStyles.miniBoldLabel);
-                patchOldScroll = EditorGUILayout.BeginScrollView(patchOldScroll, GUILayout.Height(280));
+                patchOldScroll = EditorGUILayout.BeginScrollView(patchOldScroll, GUILayout.Height(180));
                 EditorGUILayout.TextArea(patch.originalContent ?? "", GUILayout.ExpandHeight(true));
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginVertical();
                 GUILayout.Label("New", EditorStyles.miniBoldLabel);
-                patchNewScroll = EditorGUILayout.BeginScrollView(patchNewScroll, GUILayout.Height(280));
+                patchNewScroll = EditorGUILayout.BeginScrollView(patchNewScroll, GUILayout.Height(180));
                 EditorGUILayout.TextArea(patch.newContent ?? "", GUILayout.ExpandHeight(true));
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.EndVertical();
@@ -449,11 +480,13 @@ namespace UnityAssistant.Editor
             if (string.IsNullOrWhiteSpace(prompt))
             {
                 output = "Enter a feature request first.";
+                SaveWindowState();
                 return;
             }
 
             isSending = true;
             output = "Generating implementation plan...";
+            SaveWindowState();
             Repaint();
 
             try
@@ -486,11 +519,13 @@ namespace UnityAssistant.Editor
                 approvedPlan = null;
                 hasApprovedPlan = false;
                 output = FormatPlanResponse(response, request);
+                SaveWindowState();
             }
             catch (System.Exception ex)
             {
                 output = "Plan generation failed.\n\n" + ex.Message;
                 Debug.LogException(ex);
+                SaveWindowState();
             }
 
             isSending = false;
@@ -502,6 +537,7 @@ namespace UnityAssistant.Editor
             if (!hasApprovedPlan || approvedPlan == null)
             {
                 output = "No approved plan available.";
+                SaveWindowState();
                 return;
             }
 
@@ -509,6 +545,7 @@ namespace UnityAssistant.Editor
             output = "Implementing approved plan...";
             lastResponse = null;
             selectedPatchIndex = -1;
+            SaveWindowState();
             Repaint();
 
             try
@@ -538,11 +575,13 @@ namespace UnityAssistant.Editor
                 AssistantResponse response = await ApiClient.SendImplementationRequestAsync(request, approvedPlan);
                 lastResponse = response;
                 output = FormatPatchResponse(response, request);
+                SaveWindowState();
             }
             catch (System.Exception ex)
             {
                 output = "Implementation failed.\n\n" + ex.Message;
                 Debug.LogException(ex);
+                SaveWindowState();
             }
 
             isSending = false;
@@ -562,18 +601,27 @@ namespace UnityAssistant.Editor
                 PatchApplier.ApplyPatch(lastResponse.patches[selectedPatchIndex]);
                 output += "\n\nApplied patch: " + lastResponse.patches[selectedPatchIndex].filePath;
                 RefreshSelectedScript();
+                SaveWindowState();
             }
             catch (System.Exception ex)
             {
                 output += "\n\nFailed to apply patch:\n" + ex.Message;
                 Debug.LogException(ex);
+                SaveWindowState();
             }
         }
 
         private void RefreshSelectedScript()
         {
-            selectedScriptPath = ProjectScanner.GetSelectedScriptPath();
-            selectedScriptPreview = TruncatePreview(ProjectScanner.GetSelectedScriptContent());
+            if (string.IsNullOrWhiteSpace(selectedScriptPath) || selectedScriptPath == ProjectScanner.GetSelectedScriptPath())
+            {
+                selectedScriptPath = ProjectScanner.GetSelectedScriptPath();
+                selectedScriptPreview = TruncatePreview(ProjectScanner.GetSelectedScriptContent());
+            }
+            else
+            {
+                selectedScriptPreview = TruncatePreview(LoadFileContent(selectedScriptPath));
+            }
         }
 
         private string LoadFileContent(string relativePath)
@@ -676,17 +724,6 @@ namespace UnityAssistant.Editor
                 sb.AppendLine(response.nextAction);
             }
 
-            if (response.plan != null && response.plan.editorSetup != null && response.plan.editorSetup.Length > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("Editor Setup Steps:");
-                for (int i = 0; i < response.plan.editorSetup.Length; i++)
-                {
-                    var step = response.plan.editorSetup[i];
-                    sb.AppendLine($"- {step.target}: {step.action}");
-                }
-            }
-
             return sb.ToString();
         }
 
@@ -729,17 +766,6 @@ namespace UnityAssistant.Editor
                 sb.AppendLine(response.nextAction);
             }
 
-            if (response.editorSetup != null && response.editorSetup.Length > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("Editor Setup Steps:");
-                for (int i = 0; i < response.editorSetup.Length; i++)
-                {
-                    var step = response.editorSetup[i];
-                    sb.AppendLine($"- {step.target}: {step.action}");
-                }
-            }
-
             sb.AppendLine();
             sb.AppendLine("Patch Count:");
             sb.AppendLine(response.patches == null ? "0" : response.patches.Length.ToString());
@@ -747,46 +773,49 @@ namespace UnityAssistant.Editor
             return sb.ToString();
         }
 
-        private void DrawEditorSetupSection()
+        private void SaveWindowState()
         {
-            EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("Editor Setup Instructions", EditorStyles.boldLabel);
-
-            EditorSetupInstruction[] instructions = null;
-
-            if (lastResponse != null && lastResponse.editorSetup != null && lastResponse.editorSetup.Length > 0)
+            AssistantWindowState state = new AssistantWindowState
             {
-                instructions = lastResponse.editorSetup;
-            }
-            else if (lastPlanResponse != null && lastPlanResponse.plan != null &&
-                     lastPlanResponse.plan.editorSetup != null &&
-                     lastPlanResponse.plan.editorSetup.Length > 0)
-            {
-                instructions = lastPlanResponse.plan.editorSetup;
-            }
+                prompt = prompt,
+                output = output,
+                selectedScriptPath = selectedScriptPath,
+                selectedScriptPreview = selectedScriptPreview,
+                symbolSearchInput = symbolSearchInput,
+                hasApprovedPlan = hasApprovedPlan,
+                selectedPatchIndex = selectedPatchIndex,
+                lastResponse = lastResponse,
+                lastPlanResponse = lastPlanResponse,
+                approvedPlan = approvedPlan
+            };
 
-            if (instructions == null || instructions.Length == 0)
-            {
-                EditorGUILayout.HelpBox("No editor setup instructions returned.", MessageType.Info);
-                EditorGUILayout.EndVertical();
+            string json = JsonUtility.ToJson(state);
+            EditorPrefs.SetString(WindowStateKey, json);
+        }
+
+        private void LoadWindowState()
+        {
+            if (!EditorPrefs.HasKey(WindowStateKey))
                 return;
-            }
 
-            for (int i = 0; i < instructions.Length; i++)
-            {
-                EditorSetupInstruction step = instructions[i];
+            string json = EditorPrefs.GetString(WindowStateKey, "");
+            if (string.IsNullOrWhiteSpace(json))
+                return;
 
-                EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField("Target", string.IsNullOrWhiteSpace(step.target) ? "(none)" : step.target);
-                EditorGUILayout.LabelField("Action", string.IsNullOrWhiteSpace(step.action) ? "(none)" : step.action);
+            AssistantWindowState state = JsonUtility.FromJson<AssistantWindowState>(json);
+            if (state == null)
+                return;
 
-                GUILayout.Label("Details", EditorStyles.miniBoldLabel);
-                EditorGUILayout.TextArea(string.IsNullOrWhiteSpace(step.details) ? "(none)" : step.details, GUILayout.MinHeight(45));
-
-                EditorGUILayout.EndVertical();
-            }
-
-            EditorGUILayout.EndVertical();
+            prompt = state.prompt ?? "";
+            output = state.output ?? "Assistant response will appear here.";
+            selectedScriptPath = state.selectedScriptPath ?? "";
+            selectedScriptPreview = state.selectedScriptPreview ?? "";
+            symbolSearchInput = state.symbolSearchInput ?? "";
+            hasApprovedPlan = state.hasApprovedPlan;
+            selectedPatchIndex = state.selectedPatchIndex;
+            lastResponse = state.lastResponse;
+            lastPlanResponse = state.lastPlanResponse;
+            approvedPlan = state.approvedPlan;
         }
     }
 }
