@@ -14,7 +14,11 @@ namespace UnityAssistant.Editor.Services
         public static async Task<AssistantResponse> SendPlanningRequestAsync(AssistantRequest request)
         {
             string prompt = BuildPlanningPrompt(request);
-            return await SendRequestInternalAsync(prompt);
+            return await SendRequestInternalAsync(
+                prompt,
+                OpenAISettings.PlanningModel,
+                700
+            );
         }
 
         public static async Task<AssistantResponse> SendImplementationRequestAsync(
@@ -22,17 +26,24 @@ namespace UnityAssistant.Editor.Services
             FeaturePlan approvedPlan)
         {
             string prompt = BuildImplementationPrompt(request, approvedPlan);
-            return await SendRequestInternalAsync(prompt);
+            return await SendRequestInternalAsync(
+                prompt,
+                OpenAISettings.ImplementationModel,
+                2200
+            );
         }
 
-        private static async Task<AssistantResponse> SendRequestInternalAsync(string prompt)
+        private static async Task<AssistantResponse> SendRequestInternalAsync(
+            string prompt,
+            string model,
+            int maxOutputTokens)
         {
             if (string.IsNullOrWhiteSpace(OpenAISettings.ApiKey))
             {
                 throw new Exception("Missing OpenAI API key. Set it in the Unity Assistant window first.");
             }
 
-            string bodyJson = BuildRequestJson(prompt);
+            string bodyJson = BuildRequestJson(prompt, model, maxOutputTokens);
 
             using UnityWebRequest webRequest = new UnityWebRequest(Endpoint, "POST");
             byte[] bodyRaw = Encoding.UTF8.GetBytes(bodyJson);
@@ -77,11 +88,11 @@ namespace UnityAssistant.Editor.Services
             return parsed;
         }
 
-        private static string BuildRequestJson(string prompt)
+        private static string BuildRequestJson(string prompt, string model, int maxOutputTokens)
         {
             ResponsesApiRequest payload = new ResponsesApiRequest
             {
-                model = OpenAISettings.Model,
+                model = model,
                 input = prompt,
                 text = new ResponsesTextConfig
                 {
@@ -90,7 +101,8 @@ namespace UnityAssistant.Editor.Services
                         type = "json_object"
                     }
                 },
-                store = false
+                store = false,
+                max_output_tokens = maxOutputTokens
             };
 
             return JsonUtility.ToJson(payload);
@@ -129,10 +141,17 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("  \"patches\": [],");
             sb.AppendLine("  \"editorSetup\": []");
             sb.AppendLine("}");
+            sb.AppendLine();
+            sb.AppendLine("Rules:");
+            sb.AppendLine("- Plan the feature before implementation.");
+            sb.AppendLine("- Prefer modifying existing scripts over creating unnecessary new scripts.");
+            sb.AppendLine("- Keep the plan scoped and practical.");
+            sb.AppendLine("- Mention likely files to modify or create.");
             sb.AppendLine("- Include editorSetup instructions for anything the user must do manually in Unity.");
-            sb.AppendLine("- Examples: add components, assign references, create tags, set rigidbody options, attach scripts, configure inspector values.");
+            sb.AppendLine("- Do not include code patches in planning mode.");
+            sb.AppendLine();
 
-            AppendCommonContext(sb, request);
+            AppendCommonContext(sb, request, includeFullRelevantScripts: false);
 
             return sb.ToString();
         }
@@ -168,7 +187,17 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("    }");
             sb.AppendLine("  ]");
             sb.AppendLine("}");
+            sb.AppendLine();
+            sb.AppendLine("Rules:");
+            sb.AppendLine("- Follow the approved plan closely.");
+            sb.AppendLine("- Only include patches if code changes are actually needed.");
+            sb.AppendLine("- Only patch files inside Assets.");
+            sb.AppendLine("- Preserve formatting as much as possible.");
+            sb.AppendLine("- If a new file is needed, include a patch for that file path with originalContent as an empty string.");
+            sb.AppendLine("- For each patch, include full originalContent and full newContent.");
+            sb.AppendLine("- If you must deviate from the plan, explain why in warnings.");
             sb.AppendLine("- Include editorSetup instructions for any manual Unity editor actions still required after patches are applied.");
+            sb.AppendLine();
 
             sb.AppendLine("Approved plan:");
             if (approvedPlan == null)
@@ -187,12 +216,12 @@ namespace UnityAssistant.Editor.Services
             }
 
             sb.AppendLine();
-            AppendCommonContext(sb, request);
+            AppendCommonContext(sb, request, includeFullRelevantScripts: true);
 
             return sb.ToString();
         }
 
-        private static void AppendCommonContext(StringBuilder sb, AssistantRequest request)
+        private static void AppendCommonContext(StringBuilder sb, AssistantRequest request, bool includeFullRelevantScripts)
         {
             sb.AppendLine("User prompt:");
             sb.AppendLine(request.prompt ?? "");
@@ -243,20 +272,54 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine(string.IsNullOrWhiteSpace(request.manifestJson) ? "None" : request.manifestJson);
             sb.AppendLine();
 
-            sb.AppendLine("Relevant project scripts:");
-            if (request.relevantScripts == null || request.relevantScripts.Length == 0)
+            if (includeFullRelevantScripts)
             {
-                sb.AppendLine("None");
+                sb.AppendLine("Relevant project scripts:");
+                if (request.relevantScripts == null || request.relevantScripts.Length == 0)
+                {
+                    sb.AppendLine("None");
+                }
+                else
+                {
+                    foreach (var script in request.relevantScripts)
+                    {
+                        sb.AppendLine($"PATH: {script.path}");
+                        sb.AppendLine(script.content);
+                        sb.AppendLine();
+                    }
+                }
             }
             else
             {
-                foreach (var script in request.relevantScripts)
+                sb.AppendLine("Relevant project script summaries:");
+                if (request.relevantScripts == null || request.relevantScripts.Length == 0)
                 {
-                    sb.AppendLine($"PATH: {script.path}");
-                    sb.AppendLine(script.content);
-                    sb.AppendLine();
+                    sb.AppendLine("None");
+                }
+                else
+                {
+                    foreach (var script in request.relevantScripts)
+                    {
+                        sb.AppendLine(SummarizeScriptForPrompt(script));
+                    }
                 }
             }
+        }
+
+        private static string SummarizeScriptForPrompt(ScriptFileData script)
+        {
+            if (script == null)
+                return "";
+
+            string content = script.content ?? "";
+            string preview = content.Length > 800 ? content.Substring(0, 800) + "\n... [truncated]" : content;
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"PATH: {script.path}");
+            sb.AppendLine(preview);
+            sb.AppendLine();
+
+            return sb.ToString();
         }
 
         private static void AppendStringList(StringBuilder sb, string label, string[] values)
@@ -305,6 +368,7 @@ namespace UnityAssistant.Editor.Services
             public string input;
             public ResponsesTextConfig text;
             public bool store;
+            public int max_output_tokens;
         }
 
         [Serializable]

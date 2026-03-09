@@ -17,7 +17,8 @@ namespace UnityAssistant.Editor
             Plan = 1,
             Patches = 2,
             Index = 3,
-            Settings = 4
+            Settings = 4,
+            HowToUse = 5
         }
 
         private Tab currentTab = Tab.Assistant;
@@ -26,7 +27,8 @@ namespace UnityAssistant.Editor
         private string output = "Assistant response will appear here.";
 
         private string apiKeyInput = "";
-        private string modelInput = "";
+        private string planningModelInput = "";
+        private string implementationModelInput = "";
 
         private string selectedScriptPath = "";
         private string selectedScriptPreview = "";
@@ -41,6 +43,7 @@ namespace UnityAssistant.Editor
         private Vector2 patchesScroll;
         private Vector2 indexScroll;
         private Vector2 settingsScroll;
+        private Vector2 howToUseScroll;
 
         private Vector2 promptScroll;
         private Vector2 outputScroll;
@@ -54,6 +57,10 @@ namespace UnityAssistant.Editor
         private FeaturePlan approvedPlan;
         private LastAppliedChange lastAppliedChange;
 
+        private bool settingsUnlocked = false;
+        private string settingsPinInput = "";
+        private const string SettingsPin = "8620"; // change this
+
         private int selectedPatchIndex = -1;
 
         [MenuItem("Window/Unity Assistant")]
@@ -61,7 +68,8 @@ namespace UnityAssistant.Editor
         {
             AssistantWindow window = GetWindow<AssistantWindow>("Unity Assistant");
             window.apiKeyInput = OpenAISettings.ApiKey;
-            window.modelInput = OpenAISettings.Model;
+            window.planningModelInput = OpenAISettings.PlanningModel;
+            window.implementationModelInput = OpenAISettings.ImplementationModel;
             window.minSize = new Vector2(900, 650);
             window.LoadWindowState();
             window.Repaint();
@@ -70,7 +78,8 @@ namespace UnityAssistant.Editor
         private void OnEnable()
         {
             apiKeyInput = OpenAISettings.ApiKey;
-            modelInput = OpenAISettings.Model;
+            planningModelInput = OpenAISettings.PlanningModel;
+            implementationModelInput = OpenAISettings.ImplementationModel;
             LoadWindowState();
         }
 
@@ -98,6 +107,11 @@ namespace UnityAssistant.Editor
             DrawTabs();
             GUILayout.Space(8);
 
+            if (!settingsUnlocked && currentTab == Tab.Settings)
+            {
+                currentTab = Tab.Assistant;
+            }
+
             switch (currentTab)
             {
                 case Tab.Assistant:
@@ -115,6 +129,9 @@ namespace UnityAssistant.Editor
                 case Tab.Settings:
                     DrawSettingsTab();
                     break;
+                case Tab.HowToUse:
+                    DrawHowToUseTab();
+                    break;
             }
         }
 
@@ -127,6 +144,43 @@ namespace UnityAssistant.Editor
             string selected = string.IsNullOrWhiteSpace(selectedScriptPath) ? "None" : selectedScriptPath;
 
             EditorGUILayout.LabelField("Status", status);
+
+            GUILayout.Space(6);
+
+            EditorGUILayout.BeginHorizontal();
+
+            if (!settingsUnlocked)
+            {
+                settingsPinInput = EditorGUILayout.PasswordField("Unlock Settings", settingsPinInput);
+
+                if (GUILayout.Button("Unlock", GUILayout.Width(80)))
+                {
+                    if (settingsPinInput == SettingsPin)
+                    {
+                        settingsUnlocked = true;
+                        settingsPinInput = "";
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Incorrect settings PIN.");
+                    }
+                }
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Settings Access", "Unlocked");
+
+                if (GUILayout.Button("Lock Settings", GUILayout.Width(100)))
+                {
+                    settingsUnlocked = false;
+                    settingsPinInput = "";
+                    if (currentTab == Tab.Settings)
+                        currentTab = Tab.Assistant;
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.LabelField("Selected Script", selected);
 
             EditorGUILayout.EndVertical();
@@ -134,16 +188,53 @@ namespace UnityAssistant.Editor
 
         private void DrawTabs()
         {
-            string[] tabNames =
+            if (settingsUnlocked)
             {
-                "Assistant",
-                "Plan",
-                "Patches",
-                "Index",
-                "Settings"
-            };
+                string[] tabNames =
+                {
+            "Assistant",
+            "Plan",
+            "Patches",
+            "Index",
+            "Settings",
+            "How To Use"
+        };
 
-            currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, GUILayout.Height(28));
+                currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, GUILayout.Height(28));
+            }
+            else
+            {
+                string[] tabNames =
+                {
+            "Assistant",
+            "Plan",
+            "Patches",
+            "Index",
+            "How To Use"
+        };
+
+                int visibleIndex = currentTab switch
+                {
+                    Tab.Assistant => 0,
+                    Tab.Plan => 1,
+                    Tab.Patches => 2,
+                    Tab.Index => 3,
+                    Tab.HowToUse => 4,
+                    _ => 0
+                };
+
+                int selected = GUILayout.Toolbar(visibleIndex, tabNames, GUILayout.Height(28));
+
+                currentTab = selected switch
+                {
+                    0 => Tab.Assistant,
+                    1 => Tab.Plan,
+                    2 => Tab.Patches,
+                    3 => Tab.Index,
+                    4 => Tab.HowToUse,
+                    _ => Tab.Assistant
+                };
+            }
         }
 
         private void DrawAssistantTab()
@@ -206,6 +297,135 @@ namespace UnityAssistant.Editor
 
             GUILayout.Space(12);
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawHowToUseTab()
+        {
+            howToUseScroll = EditorGUILayout.BeginScrollView(howToUseScroll);
+
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label("How To Use Unity Assistant", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "This tab explains what each tab does and the normal workflow for planning and implementing features.",
+                MessageType.Info
+            );
+            EditorGUILayout.EndVertical();
+
+            GUILayout.Space(8);
+
+            DrawHelpSection(
+                "Normal Workflow",
+                new[]
+                {
+                    "1. Open the Assistant tab.",
+                    "2. Select a relevant script in the Unity Project window, or use the Index tab to find one.(Note: You don't need to select a script it will find the one you're talking about or make a new one.)",
+                    "3. Write a feature request or coding request in the prompt box.",
+                    "4. Click Generate Plan.",
+                    "5. Go to the Plan tab and review the generated plan.",
+                    "6. If the plan looks correct, click Approve Plan.",
+                    "7. Click Implement Approved Plan.",
+                    "8. Go to the Patches tab and review the generated code changes.",
+                    "9. Apply one patch at a time or use Apply All Patches.",
+                    "10. Test the feature in Unity and check the Console for issues."
+                });
+
+            DrawHelpSection(
+                "Assistant Tab",
+                new[]
+                {
+                    "Use this as the main working area.",
+                    "Selected Script shows the script currently being used as your main context anchor.",
+                    "Prompt is where you describe the feature, bug fix, or refactor you want.",
+                    "Generate Plan asks the AI to think through the implementation before making changes.",
+                    "Implement Approved Plan only works after you approve a plan in the Plan tab.",
+                    "Revert Last Change restores the most recently applied file change.",
+                    "Output shows summaries, warnings, and request results."
+                });
+
+            DrawHelpSection(
+                "Plan Tab",
+                new[]
+                {
+                    "Review the implementation plan before allowing code generation.",
+                    "Check the title, summary, goals, steps, files to modify, files to create, and risks.",
+                    "Approve Plan stores the current plan so the implementation step can use it.",
+                    "Clear Plan removes the current plan if you want to generate a new one.",
+                    "Use the Editor Setup Instructions section to see any Unity editor steps you must do manually."
+                });
+
+            DrawHelpSection(
+                "Patches Tab",
+                new[]
+                {
+                    "Review the actual code changes here.",
+                    "Each patch can be a new file or an edit to an existing file.",
+                    "Select a patch to compare Original and New code side by side.",
+                    "Apply Selected Patch only applies the highlighted patch.",
+                    "Apply All Patches applies all current patches in one batch.",
+                    "New files are labeled [NEW] and normal edits are labeled [EDIT].",
+                    "After applying patches, let Unity recompile and test the feature."
+                });
+
+            DrawHelpSection(
+                "Index Tab",
+                new[]
+                {
+                    "Search your project’s indexed scripts here.",
+                    "Use it to find classes, methods, and related scripts faster.",
+                    "Use This Script sets that script as the selected script for the Assistant tab.",
+                    "Rebuild Index refreshes the local code index if scripts changed and results look outdated."
+                });
+
+            DrawHelpSection(
+                "Settings Tab",
+                new[]
+                {
+                    "Enter and save your OpenAI API key here.",
+                    "Planning Model is the cheaper model used for generating plans.",
+                    "Implementation Model is the stronger model used for code patches.",
+                    "Reload Settings reloads saved values from EditorPrefs.",
+                    "Reset Saved State clears the saved UI session for this tool."
+                });
+
+            DrawHelpSection(
+                "Good Prompt Examples",
+                new[]
+                {
+                    "Add a stamina system. Sprinting should drain stamina, recharge should begin after 1 second, and use my existing PlayerController.",
+                    "Create a new script at Assets/Scripts/Combat/ProjectileShooter.cs with a Fire() method and do not modify other files yet.",
+                    "Fix possible null reference issues in the selected script without changing behavior.",
+                    "Add editor setup instructions for any components or inspector settings I need to configure."
+                });
+
+            DrawHelpSection(
+                "Tips",
+                new[]
+                {
+                    "Be specific about where new files should go, such as Assets/Scripts/Player/StaminaSystem.cs.",
+                    "For big systems, break work into smaller chunks instead of asking for everything at once.",
+                    "Always review plan and patches before applying.",
+                    "Using Git with your Unity project makes reverting AI changes much safer."
+                });
+
+            GUILayout.Space(12);
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawHelpSection(string title, string[] lines)
+        {
+            EditorGUILayout.BeginVertical("box");
+            GUILayout.Label(title, EditorStyles.boldLabel);
+
+            if (lines != null)
+            {
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    EditorGUILayout.LabelField("• " + lines[i], EditorStyles.wordWrappedLabel);
+                }
+            }
+
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(6);
         }
 
         private void DrawSelectedScriptCard()
@@ -315,6 +535,11 @@ namespace UnityAssistant.Editor
                 currentTab = Tab.Patches;
             }
 
+            if (GUILayout.Button("How To Use", GUILayout.Height(28)))
+            {
+                currentTab = Tab.HowToUse;
+            }
+
             if (GUILayout.Button("Clear Session", GUILayout.Height(28)))
             {
                 output = "";
@@ -328,6 +553,11 @@ namespace UnityAssistant.Editor
 
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.HelpBox(
+                "Cost-saving mode: planning uses a cheaper model and summarized related scripts.",
+                MessageType.Info
+            );
 
             EditorGUILayout.EndVertical();
         }
@@ -612,7 +842,8 @@ namespace UnityAssistant.Editor
             GUILayout.Label("OpenAI Settings", EditorStyles.boldLabel);
 
             apiKeyInput = EditorGUILayout.PasswordField("API Key", apiKeyInput);
-            modelInput = EditorGUILayout.TextField("Model", modelInput);
+            planningModelInput = EditorGUILayout.TextField("Planning Model", planningModelInput);
+            implementationModelInput = EditorGUILayout.TextField("Implementation Model", implementationModelInput);
 
             GUILayout.Space(6);
 
@@ -621,13 +852,15 @@ namespace UnityAssistant.Editor
             if (GUILayout.Button("Save Settings", GUILayout.Height(30)))
             {
                 OpenAISettings.ApiKey = apiKeyInput;
-                OpenAISettings.Model = modelInput;
+                OpenAISettings.PlanningModel = planningModelInput;
+                OpenAISettings.ImplementationModel = implementationModelInput;
             }
 
             if (GUILayout.Button("Reload Settings", GUILayout.Height(30)))
             {
                 apiKeyInput = OpenAISettings.ApiKey;
-                modelInput = OpenAISettings.Model;
+                planningModelInput = OpenAISettings.PlanningModel;
+                implementationModelInput = OpenAISettings.ImplementationModel;
             }
 
             if (GUILayout.Button("Reset Saved State", GUILayout.Height(30)))
@@ -640,7 +873,7 @@ namespace UnityAssistant.Editor
             GUILayout.Space(8);
 
             EditorGUILayout.HelpBox(
-                "API key is stored locally using Unity EditorPrefs. Window state is also saved locally.",
+                "Recommended: use gpt-5-mini for planning and gpt-5.4 for implementation to reduce cost.",
                 MessageType.Info
             );
 
@@ -695,8 +928,8 @@ namespace UnityAssistant.Editor
                     prompt = prompt,
                     selectedScriptPath = selectedPath,
                     selectedScriptContent = selectedContent,
-                    relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 8),
-                    consoleMessages = ConsoleReader.GetRelevantMessages(8),
+                    relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 4),
+                    consoleMessages = ConsoleReader.GetRelevantMessages(4),
                     manifestJson = ShouldIncludeManifest(prompt) ? ProjectScanner.GetManifestJson() : null,
                     asmdefs = ShouldIncludeAsmdefs(prompt) ? ProjectScanner.GetAllAsmdefs() : new AsmdefFileData[0]
                 };
@@ -755,8 +988,8 @@ namespace UnityAssistant.Editor
                     prompt = prompt,
                     selectedScriptPath = selectedPath,
                     selectedScriptContent = selectedContent,
-                    relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 8),
-                    consoleMessages = ConsoleReader.GetRelevantMessages(8),
+                    relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 6),
+                    consoleMessages = ConsoleReader.GetRelevantMessages(4),
                     manifestJson = ShouldIncludeManifest(prompt) ? ProjectScanner.GetManifestJson() : null,
                     asmdefs = ShouldIncludeAsmdefs(prompt) ? ProjectScanner.GetAllAsmdefs() : new AsmdefFileData[0]
                 };
