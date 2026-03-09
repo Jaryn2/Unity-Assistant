@@ -160,7 +160,8 @@ namespace UnityAssistant.Editor.Services
 
         public static ScriptFileData[] GetRelevantScriptsUsingIndex(string prompt, string selectedScriptPath, int maxScripts = 8)
         {
-            Dictionary<string, ScriptFileData> result = new Dictionary<string, ScriptFileData>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, ScriptFileData> result =
+                new Dictionary<string, ScriptFileData>(StringComparer.OrdinalIgnoreCase);
 
             void AddByPath(string path)
             {
@@ -182,29 +183,69 @@ namespace UnityAssistant.Editor.Services
                 };
             }
 
-            AddByPath(selectedScriptPath);
-
-            ScriptIndexEntry selectedEntry = GetScriptByPath(selectedScriptPath);
-            if (selectedEntry != null)
+            if (!string.IsNullOrWhiteSpace(selectedScriptPath))
             {
-                foreach (string referencedType in selectedEntry.referencedTypes ?? Array.Empty<string>())
-                {
-                    ScriptIndexEntry referenced = GetScriptByClassName(referencedType);
-                    if (referenced != null)
-                        AddByPath(referenced.path);
+                AddByPath(selectedScriptPath);
 
-                    foreach (ScriptIndexEntry dependent in GetDependentsOfClass(referencedType))
+                ScriptIndexEntry selectedEntry = GetScriptByPath(selectedScriptPath);
+                if (selectedEntry != null)
+                {
+                    foreach (string referencedType in selectedEntry.referencedTypes ?? Array.Empty<string>())
                     {
-                        AddByPath(dependent.path);
+                        ScriptIndexEntry referenced = GetScriptByClassName(referencedType);
+                        if (referenced != null)
+                            AddByPath(referenced.path);
+
+                        foreach (ScriptIndexEntry dependent in GetDependentsOfClass(referencedType))
+                        {
+                            AddByPath(dependent.path);
+                        }
                     }
                 }
             }
 
-            foreach (ScriptIndexEntry match in Search(prompt, maxScripts * 2))
+            foreach (ScriptIndexEntry match in Search(prompt, maxScripts * 3))
             {
                 AddByPath(match.path);
                 if (result.Count >= maxScripts)
                     break;
+            }
+
+            if (result.Count < maxScripts)
+            {
+                string[] promptTerms = ExtractTerms(prompt).ToArray();
+
+                foreach (ScriptIndexEntry entry in ScriptsByPath.Values.OrderBy(s => s.path))
+                {
+                    if (result.Count >= maxScripts)
+                        break;
+
+                    if (promptTerms.Length == 0)
+                    {
+                        AddByPath(entry.path);
+                        continue;
+                    }
+
+                    bool match = false;
+
+                    foreach (string term in promptTerms)
+                    {
+                        if (Contains(entry.path, term) ||
+                            Contains(entry.className, term) ||
+                            Contains(entry.baseClass, term) ||
+                            (entry.methods != null && entry.methods.Any(m => Contains(m, term))) ||
+                            (entry.referencedTypes != null && entry.referencedTypes.Any(t => Contains(t, term))))
+                        {
+                            match = true;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        AddByPath(entry.path);
+                    }
+                }
             }
 
             return result.Values

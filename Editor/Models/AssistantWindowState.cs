@@ -18,7 +18,9 @@ namespace UnityAssistant.Editor.Models
 
         public AssistantResponse lastResponse;
         public AssistantResponse lastPlanResponse;
+
         public FeaturePlan approvedPlan;
+        public string editablePlanDocument;
 
         public LastAppliedChange lastAppliedChange;
     }

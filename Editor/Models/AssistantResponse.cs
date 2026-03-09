@@ -12,8 +12,9 @@ namespace UnityAssistant.Editor.Models
         public string nextAction;
 
         public FeaturePlan plan;
-        public FilePatch[] patches;
+        public string planDocument;
 
+        public FilePatch[] patches;
         public EditorSetupInstruction[] editorSetup;
     }
 }

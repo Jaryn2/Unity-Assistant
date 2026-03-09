@@ -14,36 +14,41 @@ namespace UnityAssistant.Editor.Services
         public static async Task<AssistantResponse> SendPlanningRequestAsync(AssistantRequest request)
         {
             string prompt = BuildPlanningPrompt(request);
+
             return await SendRequestInternalAsync(
                 prompt,
                 OpenAISettings.PlanningModel,
-                700
+                15000,
+                "low"
             );
         }
 
         public static async Task<AssistantResponse> SendImplementationRequestAsync(
             AssistantRequest request,
-            FeaturePlan approvedPlan)
+            string approvedPlanDocument)
         {
-            string prompt = BuildImplementationPrompt(request, approvedPlan);
+            string prompt = BuildImplementationPrompt(request, approvedPlanDocument);
+
             return await SendRequestInternalAsync(
                 prompt,
                 OpenAISettings.ImplementationModel,
-                2200
+                15000,
+                "medium"
             );
         }
 
         private static async Task<AssistantResponse> SendRequestInternalAsync(
             string prompt,
             string model,
-            int maxOutputTokens)
+            int maxOutputTokens,
+            string reasoningEffort)
         {
             if (string.IsNullOrWhiteSpace(OpenAISettings.ApiKey))
             {
                 throw new Exception("Missing OpenAI API key. Set it in the Unity Assistant window first.");
             }
 
-            string bodyJson = BuildRequestJson(prompt, model, maxOutputTokens);
+            string bodyJson = BuildRequestJson(prompt, model, maxOutputTokens, reasoningEffort);
 
             using UnityWebRequest webRequest = new UnityWebRequest(Endpoint, "POST");
             byte[] bodyRaw = Encoding.UTF8.GetBytes(bodyJson);
@@ -71,6 +76,19 @@ namespace UnityAssistant.Editor.Services
             string rawResponse = webRequest.downloadHandler.text;
 
             ResponsesApiResponse apiResponse = JsonUtility.FromJson<ResponsesApiResponse>(rawResponse);
+
+            if (apiResponse != null &&
+                apiResponse.status == "incomplete" &&
+                apiResponse.incomplete_details != null &&
+                apiResponse.incomplete_details.reason == "max_output_tokens")
+            {
+                throw new Exception(
+                    "The model ran out of output tokens before returning final JSON.\n\n" +
+                    "Planning/implementation needs a higher max_output_tokens value or lower reasoning effort.\n\n" +
+                    "Raw response:\n" + rawResponse
+                );
+            }
+
             string outputText = ExtractOutputText(apiResponse);
 
             if (string.IsNullOrWhiteSpace(outputText))
@@ -88,7 +106,7 @@ namespace UnityAssistant.Editor.Services
             return parsed;
         }
 
-        private static string BuildRequestJson(string prompt, string model, int maxOutputTokens)
+        private static string BuildRequestJson(string prompt, string model, int maxOutputTokens, string reasoningEffort)
         {
             ResponsesApiRequest payload = new ResponsesApiRequest
             {
@@ -100,6 +118,10 @@ namespace UnityAssistant.Editor.Services
                     {
                         type = "json_object"
                     }
+                },
+                reasoning = new ResponsesReasoningConfig
+                {
+                    effort = string.IsNullOrWhiteSpace(reasoningEffort) ? "low" : reasoningEffort
                 },
                 store = false,
                 max_output_tokens = maxOutputTokens
@@ -115,6 +137,7 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("You are a Unity feature-planning assistant.");
             sb.AppendLine("Do NOT write code yet.");
             sb.AppendLine("Return JSON only.");
+            sb.AppendLine("Be concise and practical.");
             sb.AppendLine("Return valid JSON with this exact shape:");
             sb.AppendLine("{");
             sb.AppendLine("  \"mode\": \"plan\",");
@@ -138,17 +161,20 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("      }");
             sb.AppendLine("    ]");
             sb.AppendLine("  },");
+            sb.AppendLine("  \"planDocument\": \"string\",");
             sb.AppendLine("  \"patches\": [],");
             sb.AppendLine("  \"editorSetup\": []");
             sb.AppendLine("}");
             sb.AppendLine();
             sb.AppendLine("Rules:");
-            sb.AppendLine("- Plan the feature before implementation.");
-            sb.AppendLine("- Prefer modifying existing scripts over creating unnecessary new scripts.");
-            sb.AppendLine("- Keep the plan scoped and practical.");
-            sb.AppendLine("- Mention likely files to modify or create.");
-            sb.AppendLine("- Include editorSetup instructions for anything the user must do manually in Unity.");
-            sb.AppendLine("- Do not include code patches in planning mode.");
+            sb.AppendLine("- Planning mode should refine rough user ideas into a concrete implementation plan.");
+            sb.AppendLine("- Do not return patches.");
+            sb.AppendLine("- Keep the response compact.");
+            sb.AppendLine("- Keep goals and steps short.");
+            sb.AppendLine("- Include a human-editable planDocument.");
+            sb.AppendLine("- The planDocument should be plain text, readable, and easy for a user to edit by hand.");
+            sb.AppendLine("- Prefer modifying existing scripts over creating unnecessary new files.");
+            sb.AppendLine("- Include editor setup instructions for manual Unity editor actions.");
             sb.AppendLine();
 
             AppendCommonContext(sb, request, includeFullRelevantScripts: false);
@@ -156,12 +182,12 @@ namespace UnityAssistant.Editor.Services
             return sb.ToString();
         }
 
-        private static string BuildImplementationPrompt(AssistantRequest request, FeaturePlan approvedPlan)
+        private static string BuildImplementationPrompt(AssistantRequest request, string approvedPlanDocument)
         {
             StringBuilder sb = new StringBuilder();
 
             sb.AppendLine("You are a Unity implementation assistant.");
-            sb.AppendLine("Implement the APPROVED plan.");
+            sb.AppendLine("Implement the APPROVED edited plan document.");
             sb.AppendLine("Return JSON only.");
             sb.AppendLine("Return valid JSON with this exact shape:");
             sb.AppendLine("{");
@@ -171,6 +197,7 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("  \"relevantFiles\": [\"string\"],");
             sb.AppendLine("  \"nextAction\": \"string\",");
             sb.AppendLine("  \"plan\": null,");
+            sb.AppendLine("  \"planDocument\": \"\",");
             sb.AppendLine("  \"patches\": [");
             sb.AppendLine("    {");
             sb.AppendLine("      \"filePath\": \"string\",");
@@ -189,33 +216,20 @@ namespace UnityAssistant.Editor.Services
             sb.AppendLine("}");
             sb.AppendLine();
             sb.AppendLine("Rules:");
-            sb.AppendLine("- Follow the approved plan closely.");
+            sb.AppendLine("- Follow the edited plan document closely.");
             sb.AppendLine("- Only include patches if code changes are actually needed.");
             sb.AppendLine("- Only patch files inside Assets.");
             sb.AppendLine("- Preserve formatting as much as possible.");
-            sb.AppendLine("- If a new file is needed, include a patch for that file path with originalContent as an empty string.");
+            sb.AppendLine("- If a new file is needed, include a patch with empty originalContent.");
             sb.AppendLine("- For each patch, include full originalContent and full newContent.");
-            sb.AppendLine("- If you must deviate from the plan, explain why in warnings.");
-            sb.AppendLine("- Include editorSetup instructions for any manual Unity editor actions still required after patches are applied.");
+            sb.AppendLine("- If the edited plan is unclear or contradictory, explain that in warnings and do the safest reasonable implementation.");
+            sb.AppendLine("- Include editorSetup instructions for manual Unity editor work still required after patches are applied.");
             sb.AppendLine();
 
-            sb.AppendLine("Approved plan:");
-            if (approvedPlan == null)
-            {
-                sb.AppendLine("None");
-            }
-            else
-            {
-                sb.AppendLine("Title: " + (approvedPlan.title ?? ""));
-                sb.AppendLine("Summary: " + (approvedPlan.summary ?? ""));
-                AppendStringList(sb, "Goals", approvedPlan.goals);
-                AppendStringList(sb, "Steps", approvedPlan.steps);
-                AppendStringList(sb, "Files To Modify", approvedPlan.filesToModify);
-                AppendStringList(sb, "Files To Create", approvedPlan.filesToCreate);
-                AppendStringList(sb, "Risks", approvedPlan.risks);
-            }
-
+            sb.AppendLine("Approved edited plan document:");
+            sb.AppendLine(string.IsNullOrWhiteSpace(approvedPlanDocument) ? "None" : approvedPlanDocument);
             sb.AppendLine();
+
             AppendCommonContext(sb, request, includeFullRelevantScripts: true);
 
             return sb.ToString();
@@ -322,21 +336,6 @@ namespace UnityAssistant.Editor.Services
             return sb.ToString();
         }
 
-        private static void AppendStringList(StringBuilder sb, string label, string[] values)
-        {
-            sb.AppendLine(label + ":");
-            if (values == null || values.Length == 0)
-            {
-                sb.AppendLine("- none");
-                return;
-            }
-
-            for (int i = 0; i < values.Length; i++)
-            {
-                sb.AppendLine("- " + values[i]);
-            }
-        }
-
         private static string ExtractOutputText(ResponsesApiResponse response)
         {
             if (response == null || response.output == null)
@@ -367,6 +366,7 @@ namespace UnityAssistant.Editor.Services
             public string model;
             public string input;
             public ResponsesTextConfig text;
+            public ResponsesReasoningConfig reasoning;
             public bool store;
             public int max_output_tokens;
         }
@@ -384,11 +384,24 @@ namespace UnityAssistant.Editor.Services
         }
 
         [Serializable]
+        private class ResponsesReasoningConfig
+        {
+            public string effort;
+        }
+
+        [Serializable]
         private class ResponsesApiResponse
         {
             public string id;
             public string status;
+            public ResponsesIncompleteDetails incomplete_details;
             public ResponseOutputMessage[] output;
+        }
+
+        [Serializable]
+        private class ResponsesIncompleteDetails
+        {
+            public string reason;
         }
 
         [Serializable]

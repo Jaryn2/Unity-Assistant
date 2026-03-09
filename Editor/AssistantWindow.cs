@@ -34,6 +34,7 @@ namespace UnityAssistant.Editor
         private string selectedScriptPreview = "";
 
         private string symbolSearchInput = "";
+        private string editablePlanDocument = "";
 
         private bool isSending = false;
         private bool hasApprovedPlan = false;
@@ -51,15 +52,12 @@ namespace UnityAssistant.Editor
         private Vector2 symbolSearchScroll;
         private Vector2 patchOldScroll;
         private Vector2 patchNewScroll;
+        private Vector2 planDocumentScroll;
 
         private AssistantResponse lastResponse;
         private AssistantResponse lastPlanResponse;
         private FeaturePlan approvedPlan;
         private LastAppliedChange lastAppliedChange;
-
-        private bool settingsUnlocked = false;
-        private string settingsPinInput = "";
-        private const string SettingsPin = "8620"; // change this
 
         private int selectedPatchIndex = -1;
 
@@ -70,7 +68,7 @@ namespace UnityAssistant.Editor
             window.apiKeyInput = OpenAISettings.ApiKey;
             window.planningModelInput = OpenAISettings.PlanningModel;
             window.implementationModelInput = OpenAISettings.ImplementationModel;
-            window.minSize = new Vector2(900, 650);
+            window.minSize = new Vector2(920, 700);
             window.LoadWindowState();
             window.Repaint();
         }
@@ -90,14 +88,16 @@ namespace UnityAssistant.Editor
 
         private void OnSelectionChange()
         {
-            RefreshSelectedScript();
-            SaveWindowState();
-            Repaint();
+            if (ProjectScanner.GetSelectedScriptPath() != null)
+            {
+                RefreshSelectedScript();
+                SaveWindowState();
+                Repaint();
+            }
         }
 
         private void OnFocus()
         {
-            RefreshSelectedScript();
             Repaint();
         }
 
@@ -106,11 +106,6 @@ namespace UnityAssistant.Editor
             DrawHeader();
             DrawTabs();
             GUILayout.Space(8);
-
-            if (!settingsUnlocked && currentTab == Tab.Settings)
-            {
-                currentTab = Tab.Assistant;
-            }
 
             switch (currentTab)
             {
@@ -141,46 +136,11 @@ namespace UnityAssistant.Editor
             GUILayout.Label("Unity Assistant", EditorStyles.boldLabel);
 
             string status = isSending ? "Busy" : "Ready";
+            string contextMode = string.IsNullOrWhiteSpace(selectedScriptPath) ? "Project-wide" : "Script-focused";
             string selected = string.IsNullOrWhiteSpace(selectedScriptPath) ? "None" : selectedScriptPath;
 
             EditorGUILayout.LabelField("Status", status);
-
-            GUILayout.Space(6);
-
-            EditorGUILayout.BeginHorizontal();
-
-            if (!settingsUnlocked)
-            {
-                settingsPinInput = EditorGUILayout.PasswordField("Unlock Settings", settingsPinInput);
-
-                if (GUILayout.Button("Unlock", GUILayout.Width(80)))
-                {
-                    if (settingsPinInput == SettingsPin)
-                    {
-                        settingsUnlocked = true;
-                        settingsPinInput = "";
-                    }
-                    else
-                    {
-                        Debug.LogWarning("Incorrect settings PIN.");
-                    }
-                }
-            }
-            else
-            {
-                EditorGUILayout.LabelField("Settings Access", "Unlocked");
-
-                if (GUILayout.Button("Lock Settings", GUILayout.Width(100)))
-                {
-                    settingsUnlocked = false;
-                    settingsPinInput = "";
-                    if (currentTab == Tab.Settings)
-                        currentTab = Tab.Assistant;
-                }
-            }
-
-            EditorGUILayout.EndHorizontal();
-
+            EditorGUILayout.LabelField("Context Mode", contextMode);
             EditorGUILayout.LabelField("Selected Script", selected);
 
             EditorGUILayout.EndVertical();
@@ -188,53 +148,17 @@ namespace UnityAssistant.Editor
 
         private void DrawTabs()
         {
-            if (settingsUnlocked)
+            string[] tabNames =
             {
-                string[] tabNames =
-                {
-            "Assistant",
-            "Plan",
-            "Patches",
-            "Index",
-            "Settings",
-            "How To Use"
-        };
+                "Assistant",
+                "Plan",
+                "Patches",
+                "Index",
+                "Settings",
+                "How To Use"
+            };
 
-                currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, GUILayout.Height(28));
-            }
-            else
-            {
-                string[] tabNames =
-                {
-            "Assistant",
-            "Plan",
-            "Patches",
-            "Index",
-            "How To Use"
-        };
-
-                int visibleIndex = currentTab switch
-                {
-                    Tab.Assistant => 0,
-                    Tab.Plan => 1,
-                    Tab.Patches => 2,
-                    Tab.Index => 3,
-                    Tab.HowToUse => 4,
-                    _ => 0
-                };
-
-                int selected = GUILayout.Toolbar(visibleIndex, tabNames, GUILayout.Height(28));
-
-                currentTab = selected switch
-                {
-                    0 => Tab.Assistant,
-                    1 => Tab.Plan,
-                    2 => Tab.Patches,
-                    3 => Tab.Index,
-                    4 => Tab.HowToUse,
-                    _ => Tab.Assistant
-                };
-            }
+            currentTab = (Tab)GUILayout.Toolbar((int)currentTab, tabNames, GUILayout.Height(28));
         }
 
         private void DrawAssistantTab()
@@ -260,7 +184,7 @@ namespace UnityAssistant.Editor
         {
             planScroll = EditorGUILayout.BeginScrollView(planScroll);
 
-            DrawPlanCard();
+            DrawEditablePlanDocumentCard();
             GUILayout.Space(8);
 
             DrawEditorSetupCard();
@@ -306,7 +230,7 @@ namespace UnityAssistant.Editor
             EditorGUILayout.BeginVertical("box");
             GUILayout.Label("How To Use Unity Assistant", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "This tab explains what each tab does and the normal workflow for planning and implementing features.",
+                "Planning generates an editable plan document. You can manually edit that document before implementation.",
                 MessageType.Info
             );
             EditorGUILayout.EndVertical();
@@ -314,97 +238,25 @@ namespace UnityAssistant.Editor
             GUILayout.Space(8);
 
             DrawHelpSection(
-                "Normal Workflow",
+                "Planning Workflow",
                 new[]
                 {
-                    "1. Open the Assistant tab.",
-                    "2. Select a relevant script in the Unity Project window, or use the Index tab to find one.(Note: You don't need to select a script it will find the one you're talking about or make a new one.)",
-                    "3. Write a feature request or coding request in the prompt box.",
-                    "4. Click Generate Plan.",
-                    "5. Go to the Plan tab and review the generated plan.",
-                    "6. If the plan looks correct, click Approve Plan.",
-                    "7. Click Implement Approved Plan.",
-                    "8. Go to the Patches tab and review the generated code changes.",
-                    "9. Apply one patch at a time or use Apply All Patches.",
-                    "10. Test the feature in Unity and check the Console for issues."
+                    "1. Enter a rough idea or feature request in the Assistant tab.",
+                    "2. Click Generate Plan.",
+                    "3. Go to the Plan tab.",
+                    "4. Review the structured plan and the editable plan document.",
+                    "5. Edit the plan document by hand if needed.",
+                    "6. Click Approve Edited Plan.",
+                    "7. Click Implement Approved Plan to generate patches from the edited plan document."
                 });
 
             DrawHelpSection(
-                "Assistant Tab",
+                "Editable Plan Document",
                 new[]
                 {
-                    "Use this as the main working area.",
-                    "Selected Script shows the script currently being used as your main context anchor.",
-                    "Prompt is where you describe the feature, bug fix, or refactor you want.",
-                    "Generate Plan asks the AI to think through the implementation before making changes.",
-                    "Implement Approved Plan only works after you approve a plan in the Plan tab.",
-                    "Revert Last Change restores the most recently applied file change.",
-                    "Output shows summaries, warnings, and request results."
-                });
-
-            DrawHelpSection(
-                "Plan Tab",
-                new[]
-                {
-                    "Review the implementation plan before allowing code generation.",
-                    "Check the title, summary, goals, steps, files to modify, files to create, and risks.",
-                    "Approve Plan stores the current plan so the implementation step can use it.",
-                    "Clear Plan removes the current plan if you want to generate a new one.",
-                    "Use the Editor Setup Instructions section to see any Unity editor steps you must do manually."
-                });
-
-            DrawHelpSection(
-                "Patches Tab",
-                new[]
-                {
-                    "Review the actual code changes here.",
-                    "Each patch can be a new file or an edit to an existing file.",
-                    "Select a patch to compare Original and New code side by side.",
-                    "Apply Selected Patch only applies the highlighted patch.",
-                    "Apply All Patches applies all current patches in one batch.",
-                    "New files are labeled [NEW] and normal edits are labeled [EDIT].",
-                    "After applying patches, let Unity recompile and test the feature."
-                });
-
-            DrawHelpSection(
-                "Index Tab",
-                new[]
-                {
-                    "Search your project’s indexed scripts here.",
-                    "Use it to find classes, methods, and related scripts faster.",
-                    "Use This Script sets that script as the selected script for the Assistant tab.",
-                    "Rebuild Index refreshes the local code index if scripts changed and results look outdated."
-                });
-
-            DrawHelpSection(
-                "Settings Tab",
-                new[]
-                {
-                    "Enter and save your OpenAI API key here.",
-                    "Planning Model is the cheaper model used for generating plans.",
-                    "Implementation Model is the stronger model used for code patches.",
-                    "Reload Settings reloads saved values from EditorPrefs.",
-                    "Reset Saved State clears the saved UI session for this tool."
-                });
-
-            DrawHelpSection(
-                "Good Prompt Examples",
-                new[]
-                {
-                    "Add a stamina system. Sprinting should drain stamina, recharge should begin after 1 second, and use my existing PlayerController.",
-                    "Create a new script at Assets/Scripts/Combat/ProjectileShooter.cs with a Fire() method and do not modify other files yet.",
-                    "Fix possible null reference issues in the selected script without changing behavior.",
-                    "Add editor setup instructions for any components or inspector settings I need to configure."
-                });
-
-            DrawHelpSection(
-                "Tips",
-                new[]
-                {
-                    "Be specific about where new files should go, such as Assets/Scripts/Player/StaminaSystem.cs.",
-                    "For big systems, break work into smaller chunks instead of asking for everything at once.",
-                    "Always review plan and patches before applying.",
-                    "Using Git with your Unity project makes reverting AI changes much safer."
+                    "The plan document is plain text so you can rewrite it manually.",
+                    "You can add or remove steps, change file targets, and rewrite requirements.",
+                    "Implementation uses the edited plan document, not just the original generated plan."
                 });
 
             GUILayout.Space(12);
@@ -432,24 +284,34 @@ namespace UnityAssistant.Editor
         {
             EditorGUILayout.BeginVertical("box");
 
-            GUILayout.Label("Selected Script", EditorStyles.boldLabel);
+            GUILayout.Label("Selected Script (Optional Context)", EditorStyles.boldLabel);
 
             EditorGUILayout.TextField(
                 "Path",
                 string.IsNullOrWhiteSpace(selectedScriptPath)
-                    ? "No C# script selected in Project window"
+                    ? "No script selected. The assistant will use project-wide context."
                     : selectedScriptPath
+            );
+
+            EditorGUILayout.HelpBox(
+                "Tip: select a script if you want to focus the request on a specific area. Leave it empty for project-wide planning.",
+                MessageType.None
             );
 
             EditorGUILayout.BeginHorizontal();
 
-            if (GUILayout.Button("Refresh Selection", GUILayout.Height(26)))
+            if (GUILayout.Button("Use Current Project Selection", GUILayout.Height(26)))
             {
-                RefreshSelectedScript();
-                SaveWindowState();
+                string newPath = ProjectScanner.GetSelectedScriptPath();
+                if (!string.IsNullOrWhiteSpace(newPath))
+                {
+                    selectedScriptPath = newPath;
+                    selectedScriptPreview = TruncatePreview(ProjectScanner.GetSelectedScriptContent());
+                    SaveWindowState();
+                }
             }
 
-            if (GUILayout.Button("Clear Selected Script", GUILayout.Height(26)))
+            if (GUILayout.Button("Clear Optional Script", GUILayout.Height(26)))
             {
                 selectedScriptPath = "";
                 selectedScriptPreview = "";
@@ -464,7 +326,7 @@ namespace UnityAssistant.Editor
             selectedScriptScroll = EditorGUILayout.BeginScrollView(selectedScriptScroll, GUILayout.Height(160));
             EditorGUILayout.TextArea(
                 string.IsNullOrWhiteSpace(selectedScriptPreview)
-                    ? "Click a .cs file in the Project window to load it here."
+                    ? "No script selected. The assistant will use project-wide context."
                     : selectedScriptPreview,
                 GUILayout.ExpandHeight(true)
             );
@@ -505,7 +367,7 @@ namespace UnityAssistant.Editor
                 GeneratePlan();
             }
 
-            GUI.enabled = !isSending && hasApprovedPlan;
+            GUI.enabled = !isSending && hasApprovedPlan && !string.IsNullOrWhiteSpace(editablePlanDocument);
             if (GUILayout.Button("Implement Approved Plan", GUILayout.Height(34)))
             {
                 ImplementApprovedPlan();
@@ -546,6 +408,7 @@ namespace UnityAssistant.Editor
                 lastResponse = null;
                 lastPlanResponse = null;
                 approvedPlan = null;
+                editablePlanDocument = "";
                 hasApprovedPlan = false;
                 selectedPatchIndex = -1;
                 SaveWindowState();
@@ -555,7 +418,7 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.HelpBox(
-                "Cost-saving mode: planning uses a cheaper model and summarized related scripts.",
+                "Planning generates an editable plan document. Implementation uses that edited plan document.",
                 MessageType.Info
             );
 
@@ -575,55 +438,71 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawPlanCard()
+        private void DrawEditablePlanDocumentCard()
         {
             EditorGUILayout.BeginVertical("box");
-            GUILayout.Label("Implementation Plan", EditorStyles.boldLabel);
+            GUILayout.Label("Editable Plan Document", EditorStyles.boldLabel);
 
-            if (lastPlanResponse == null || lastPlanResponse.plan == null)
+            if (lastPlanResponse == null && string.IsNullOrWhiteSpace(editablePlanDocument))
             {
                 EditorGUILayout.HelpBox("No plan generated yet.", MessageType.Info);
                 EditorGUILayout.EndVertical();
                 return;
             }
 
-            FeaturePlan plan = lastPlanResponse.plan;
+            EditorGUILayout.HelpBox(
+                "Edit this plan by hand before implementation. Implementation will use this text as the approved plan.",
+                MessageType.Info
+            );
 
-            EditorGUILayout.LabelField("Title", plan.title ?? "");
-            EditorGUILayout.LabelField("Summary", plan.summary ?? "");
+            planDocumentScroll = EditorGUILayout.BeginScrollView(planDocumentScroll, GUILayout.Height(420));
+            string newPlanDocument = EditorGUILayout.TextArea(
+                string.IsNullOrWhiteSpace(editablePlanDocument) ? "" : editablePlanDocument,
+                GUILayout.ExpandHeight(true)
+            );
+            EditorGUILayout.EndScrollView();
 
-            GUILayout.Space(6);
-            DrawStringList("Goals", plan.goals);
-            GUILayout.Space(6);
-            DrawStringList("Steps", plan.steps);
-            GUILayout.Space(6);
-            DrawStringList("Files To Modify", plan.filesToModify);
-            GUILayout.Space(6);
-            DrawStringList("Files To Create", plan.filesToCreate);
-            GUILayout.Space(6);
-            DrawStringList("Risks", plan.risks);
-
-            GUILayout.Space(10);
-
-            EditorGUILayout.BeginHorizontal();
-
-            if (GUILayout.Button(hasApprovedPlan ? "Plan Approved" : "Approve Plan", GUILayout.Height(30)))
+            if (newPlanDocument != editablePlanDocument)
             {
-                approvedPlan = plan;
-                hasApprovedPlan = true;
-                output = "Plan approved. You can now click 'Implement Approved Plan'.";
+                editablePlanDocument = newPlanDocument;
                 SaveWindowState();
             }
 
-            if (GUILayout.Button("Clear Plan", GUILayout.Height(30)))
+            GUILayout.Space(8);
+
+            EditorGUILayout.BeginHorizontal();
+
+            if (GUILayout.Button("Reset From Generated Plan", GUILayout.Height(28)))
+            {
+                editablePlanDocument = BuildPlanDocumentFromCurrentPlan();
+                SaveWindowState();
+            }
+
+            GUI.enabled = !string.IsNullOrWhiteSpace(editablePlanDocument);
+
+            if (GUILayout.Button(hasApprovedPlan ? "Plan Approved" : "Approve Edited Plan", GUILayout.Height(28)))
+            {
+                if (lastPlanResponse != null && !string.IsNullOrWhiteSpace(editablePlanDocument))
+                {
+                    approvedPlan = lastPlanResponse.plan;
+                    hasApprovedPlan = true;
+                    output = "Edited plan approved. You can now click 'Implement Approved Plan'.";
+                    SaveWindowState();
+                }
+            }
+
+            GUI.enabled = true;
+
+            if (GUILayout.Button("Clear Plan", GUILayout.Height(28)))
             {
                 approvedPlan = null;
                 lastPlanResponse = null;
+                editablePlanDocument = "";
                 hasApprovedPlan = false;
                 SaveWindowState();
             }
 
-            if (GUILayout.Button("Go To Assistant Tab", GUILayout.Height(30)))
+            if (GUILayout.Button("Go To Assistant Tab", GUILayout.Height(28)))
             {
                 currentTab = Tab.Assistant;
             }
@@ -631,6 +510,67 @@ namespace UnityAssistant.Editor
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
+        }
+
+        private string BuildPlanDocumentFromCurrentPlan()
+        {
+            if (lastPlanResponse == null)
+                return "";
+
+            if (!string.IsNullOrWhiteSpace(lastPlanResponse.planDocument))
+                return lastPlanResponse.planDocument;
+
+            if (lastPlanResponse.plan == null)
+                return "";
+
+            FeaturePlan plan = lastPlanResponse.plan;
+            StringBuilder sb = new StringBuilder();
+
+            sb.AppendLine("Title:");
+            sb.AppendLine(plan.title ?? "");
+            sb.AppendLine();
+
+            sb.AppendLine("Summary:");
+            sb.AppendLine(plan.summary ?? "");
+            sb.AppendLine();
+
+            AppendDocList(sb, "Goals", plan.goals);
+            AppendDocList(sb, "Implementation Steps", plan.steps);
+            AppendDocList(sb, "Files To Modify", plan.filesToModify);
+            AppendDocList(sb, "Files To Create", plan.filesToCreate);
+            AppendDocList(sb, "Risks", plan.risks);
+
+            if (plan.editorSetup != null && plan.editorSetup.Length > 0)
+            {
+                sb.AppendLine("Editor Setup:");
+                for (int i = 0; i < plan.editorSetup.Length; i++)
+                {
+                    var step = plan.editorSetup[i];
+                    sb.AppendLine($"- Target: {step.target}");
+                    sb.AppendLine($"  Action: {step.action}");
+                    sb.AppendLine($"  Details: {step.details}");
+                }
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        private void AppendDocList(StringBuilder sb, string label, string[] values)
+        {
+            sb.AppendLine(label + ":");
+            if (values == null || values.Length == 0)
+            {
+                sb.AppendLine("- none");
+            }
+            else
+            {
+                for (int i = 0; i < values.Length; i++)
+                {
+                    sb.AppendLine("- " + values[i]);
+                }
+            }
+            sb.AppendLine();
         }
 
         private void DrawEditorSetupCard()
@@ -873,7 +813,7 @@ namespace UnityAssistant.Editor
             GUILayout.Space(8);
 
             EditorGUILayout.HelpBox(
-                "Recommended: use gpt-5-mini for planning and gpt-5.4 for implementation to reduce cost.",
+                "Planning uses the planning model and generates an editable plan document. Implementation uses the implementation model.",
                 MessageType.Info
             );
 
@@ -912,22 +852,18 @@ namespace UnityAssistant.Editor
 
             try
             {
-                string selectedPath = !string.IsNullOrWhiteSpace(selectedScriptPath)
-                    ? selectedScriptPath
-                    : ProjectScanner.GetSelectedScriptPath();
-
+                string selectedPath = selectedScriptPath;
                 string selectedContent = !string.IsNullOrWhiteSpace(selectedPath)
                     ? LoadFileContent(selectedPath)
                     : "";
 
-                selectedScriptPath = selectedPath;
                 selectedScriptPreview = TruncatePreview(selectedContent);
 
                 AssistantRequest request = new AssistantRequest
                 {
                     prompt = prompt,
-                    selectedScriptPath = selectedPath,
-                    selectedScriptContent = selectedContent,
+                    selectedScriptPath = selectedPath ?? "",
+                    selectedScriptContent = selectedContent ?? "",
                     relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 4),
                     consoleMessages = ConsoleReader.GetRelevantMessages(4),
                     manifestJson = ShouldIncludeManifest(prompt) ? ProjectScanner.GetManifestJson() : null,
@@ -939,6 +875,10 @@ namespace UnityAssistant.Editor
                 lastPlanResponse = response;
                 approvedPlan = null;
                 hasApprovedPlan = false;
+                editablePlanDocument = !string.IsNullOrWhiteSpace(response.planDocument)
+                    ? response.planDocument
+                    : BuildPlanDocumentFromCurrentPlanResponse(response);
+
                 output = FormatPlanResponse(response, request);
                 currentTab = Tab.Plan;
                 SaveWindowState();
@@ -954,17 +894,55 @@ namespace UnityAssistant.Editor
             Repaint();
         }
 
+        private string BuildPlanDocumentFromCurrentPlanResponse(AssistantResponse response)
+        {
+            if (response == null || response.plan == null)
+                return "";
+
+            FeaturePlan plan = response.plan;
+            StringBuilder sb = new StringBuilder();
+
+            sb.AppendLine("Title:");
+            sb.AppendLine(plan.title ?? "");
+            sb.AppendLine();
+
+            sb.AppendLine("Summary:");
+            sb.AppendLine(plan.summary ?? "");
+            sb.AppendLine();
+
+            AppendDocList(sb, "Goals", plan.goals);
+            AppendDocList(sb, "Implementation Steps", plan.steps);
+            AppendDocList(sb, "Files To Modify", plan.filesToModify);
+            AppendDocList(sb, "Files To Create", plan.filesToCreate);
+            AppendDocList(sb, "Risks", plan.risks);
+
+            if (plan.editorSetup != null && plan.editorSetup.Length > 0)
+            {
+                sb.AppendLine("Editor Setup:");
+                for (int i = 0; i < plan.editorSetup.Length; i++)
+                {
+                    var step = plan.editorSetup[i];
+                    sb.AppendLine($"- Target: {step.target}");
+                    sb.AppendLine($"  Action: {step.action}");
+                    sb.AppendLine($"  Details: {step.details}");
+                }
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
         private async void ImplementApprovedPlan()
         {
-            if (!hasApprovedPlan || approvedPlan == null)
+            if (!hasApprovedPlan || string.IsNullOrWhiteSpace(editablePlanDocument))
             {
-                output = "No approved plan available.";
+                output = "No approved edited plan available.";
                 SaveWindowState();
                 return;
             }
 
             isSending = true;
-            output = "Implementing approved plan...";
+            output = "Implementing approved edited plan...";
             lastResponse = null;
             selectedPatchIndex = -1;
             SaveWindowState();
@@ -972,29 +950,25 @@ namespace UnityAssistant.Editor
 
             try
             {
-                string selectedPath = !string.IsNullOrWhiteSpace(selectedScriptPath)
-                    ? selectedScriptPath
-                    : ProjectScanner.GetSelectedScriptPath();
-
+                string selectedPath = selectedScriptPath;
                 string selectedContent = !string.IsNullOrWhiteSpace(selectedPath)
                     ? LoadFileContent(selectedPath)
                     : "";
 
-                selectedScriptPath = selectedPath;
                 selectedScriptPreview = TruncatePreview(selectedContent);
 
                 AssistantRequest request = new AssistantRequest
                 {
                     prompt = prompt,
-                    selectedScriptPath = selectedPath,
-                    selectedScriptContent = selectedContent,
+                    selectedScriptPath = selectedPath ?? "",
+                    selectedScriptContent = selectedContent ?? "",
                     relevantScripts = CodeIndex.GetRelevantScriptsUsingIndex(prompt, selectedPath, 6),
                     consoleMessages = ConsoleReader.GetRelevantMessages(4),
                     manifestJson = ShouldIncludeManifest(prompt) ? ProjectScanner.GetManifestJson() : null,
                     asmdefs = ShouldIncludeAsmdefs(prompt) ? ProjectScanner.GetAllAsmdefs() : new AsmdefFileData[0]
                 };
 
-                AssistantResponse response = await ApiClient.SendImplementationRequestAsync(request, approvedPlan);
+                AssistantResponse response = await ApiClient.SendImplementationRequestAsync(request, editablePlanDocument);
                 lastResponse = response;
                 output = FormatPatchResponse(response, request);
                 currentTab = Tab.Patches;
@@ -1099,15 +1073,13 @@ namespace UnityAssistant.Editor
 
         private void RefreshSelectedScript()
         {
-            if (string.IsNullOrWhiteSpace(selectedScriptPath) || selectedScriptPath == ProjectScanner.GetSelectedScriptPath())
+            if (string.IsNullOrWhiteSpace(selectedScriptPath))
             {
-                selectedScriptPath = ProjectScanner.GetSelectedScriptPath();
-                selectedScriptPreview = TruncatePreview(ProjectScanner.GetSelectedScriptContent());
+                selectedScriptPreview = "";
+                return;
             }
-            else
-            {
-                selectedScriptPreview = TruncatePreview(LoadFileContent(selectedScriptPath));
-            }
+
+            selectedScriptPreview = TruncatePreview(LoadFileContent(selectedScriptPath));
         }
 
         private string LoadFileContent(string relativePath)
@@ -1170,6 +1142,7 @@ namespace UnityAssistant.Editor
 
             sb.AppendLine();
             sb.AppendLine("Context Sent:");
+            sb.AppendLine("- Context mode: " + (string.IsNullOrWhiteSpace(request.selectedScriptPath) ? "Project-wide" : "Script-focused"));
             sb.AppendLine("- Selected script: " + (string.IsNullOrWhiteSpace(request.selectedScriptPath) ? "None" : request.selectedScriptPath));
             sb.AppendLine("- Relevant scripts: " + (request.relevantScripts == null ? 0 : request.relevantScripts.Length));
             sb.AppendLine("- Console messages: " + (request.consoleMessages == null ? 0 : request.consoleMessages.Length));
@@ -1197,10 +1170,6 @@ namespace UnityAssistant.Editor
                 sb.AppendLine();
                 sb.AppendLine("Plan Title:");
                 sb.AppendLine(response.plan.title ?? "(none)");
-
-                sb.AppendLine();
-                sb.AppendLine("Plan Summary:");
-                sb.AppendLine(response.plan.summary ?? "(none)");
             }
 
             if (!string.IsNullOrWhiteSpace(response.nextAction))
@@ -1208,6 +1177,12 @@ namespace UnityAssistant.Editor
                 sb.AppendLine();
                 sb.AppendLine("Next Action:");
                 sb.AppendLine(response.nextAction);
+            }
+
+            if (!string.IsNullOrWhiteSpace(response.planDocument))
+            {
+                sb.AppendLine();
+                sb.AppendLine("Editable plan document generated.");
             }
 
             return sb.ToString();
@@ -1223,6 +1198,7 @@ namespace UnityAssistant.Editor
 
             sb.AppendLine();
             sb.AppendLine("Context Sent:");
+            sb.AppendLine("- Context mode: " + (string.IsNullOrWhiteSpace(request.selectedScriptPath) ? "Project-wide" : "Script-focused"));
             sb.AppendLine("- Selected script: " + (string.IsNullOrWhiteSpace(request.selectedScriptPath) ? "None" : request.selectedScriptPath));
             sb.AppendLine("- Relevant scripts: " + (request.relevantScripts == null ? 0 : request.relevantScripts.Length));
             sb.AppendLine("- Console messages: " + (request.consoleMessages == null ? 0 : request.consoleMessages.Length));
@@ -1273,6 +1249,7 @@ namespace UnityAssistant.Editor
                 lastResponse = lastResponse,
                 lastPlanResponse = lastPlanResponse,
                 approvedPlan = approvedPlan,
+                editablePlanDocument = editablePlanDocument,
                 lastAppliedChange = lastAppliedChange
             };
 
@@ -1303,6 +1280,7 @@ namespace UnityAssistant.Editor
             lastResponse = state.lastResponse;
             lastPlanResponse = state.lastPlanResponse;
             approvedPlan = state.approvedPlan;
+            editablePlanDocument = state.editablePlanDocument ?? "";
             lastAppliedChange = state.lastAppliedChange;
         }
 
@@ -1318,6 +1296,7 @@ namespace UnityAssistant.Editor
             lastResponse = null;
             lastPlanResponse = null;
             approvedPlan = null;
+            editablePlanDocument = "";
             hasApprovedPlan = false;
             selectedPatchIndex = -1;
             lastAppliedChange = null;
